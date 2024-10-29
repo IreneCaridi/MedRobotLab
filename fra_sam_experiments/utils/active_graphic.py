@@ -20,11 +20,11 @@ def int2color(integer, max_value=10):
     Convert an integer to a distinct color using a colormap.
 
     Args:
-    - integer: int, the integer to convert to a color.
-    - max_value: int, the maximum possible value of the integer (for normalizing the color range).
+        - integer: int, the integer to convert to a color.
+        - max_value: int, the maximum possible value of the integer (for normalizing the color range).
 
     Returns:
-    - color: str or tuple, the color suitable for plt.text.
+           - color: str or tuple, the color suitable for plt.text.
     """
     if integer == 'bkg':
         integer = 0
@@ -49,13 +49,20 @@ def select_images():
                                              filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp")])
     return list(file_paths)
 
+
 # Helper function to update the title with the current label
 def update_title(target_obj):
     plt.title(f"Click to select points - Current Label: {target_obj}. Press ""right"" or ""left"" or b to switch labels.")
     plt.draw()
 
-# Function to display image and capture user points with labels
+
 def annotate_image(image_path):
+    """
+        Function to display image and capture user points with labels
+
+        args:
+            -image_path: path to image
+    """
     image = cv2.imread(image_path)
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB for displaying in matplotlib
 
@@ -70,22 +77,26 @@ def annotate_image(image_path):
     fig, ax = plt.subplots()
     ax.imshow(image_rgb)
 
+    plotted_points = []
 
     # Function to handle mouse clicks and store points with the current label
     def onclick(event):
         ix, iy = event.xdata, event.ydata
         if ix is not None and iy is not None:
             labeled_points.append(([int(ix), int(iy)], target_obj))
-            print(f"Point selected: ({ix:.0f}, {iy:.0f}) for label {target_obj}")
+            print(f"Point selected: ({ix:.0f}, {iy:.0f}) for target {target_obj}")
             # Draw a small circle at the clicked point and label it
-            plt.scatter(ix, iy, s=40, color=int2color(target_obj))
-            plt.text(ix, iy, f"obj {target_obj}", fontsize=8, color=int2color(target_obj))
+            scatter = plt.scatter(ix, iy, s=40, color=int2color(target_obj))
+            text = plt.text(ix, iy, f"obj {target_obj}", fontsize=8, color=int2color(target_obj))
+
+            plotted_points.append((scatter, text))
             plt.draw()
 
     # Function to handle key presses for switching labels
     def onkey(event):
         nonlocal target_obj
         nonlocal last
+        nonlocal labeled_points
         if event.key == 'right':
             if target_obj != 'bkg':
                 target_obj += 1
@@ -99,7 +110,20 @@ def annotate_image(image_path):
         elif event.key == 'b':
             last = target_obj
             target_obj = 'bkg'
+        elif event.key == 'r':
+            print(f'Removing last point')
+
+            # removing last point from list
+            labeled_points = labeled_points[:-1]
+
+            # removing last point from plot
+            last_scatter, last_text = plotted_points.pop()
+            last_scatter.remove()
+            last_text.remove()
+            plt.draw()
+
         update_title(target_obj)
+
 
     # Connect the click and key events
     cid_click = fig.canvas.mpl_connect('button_press_event', onclick)

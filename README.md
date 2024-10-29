@@ -11,3 +11,9 @@ pip install -r requirements.txt
 ```
 Sam2 is already put into .gitignore, so it should be fine, but remember to delete the .git folder inside sam2, 
 just to be sure.
+
+Then install the weights of sam2:
+```
+cd sam2/checkpoints
+download_ckpts.sh
+```
