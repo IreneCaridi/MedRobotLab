@@ -69,7 +69,7 @@ def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_l
         # boxes
         show_box(box_coords, plt.gca())
 
-    plt.title(f'{img_name}: green points are foreground')
+    plt.title(f'{img_name}: green points are foreground, red ones are background')
     plt.axis('off')
     plt.show()
 

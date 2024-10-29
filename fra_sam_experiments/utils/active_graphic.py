@@ -15,6 +15,7 @@ def obj2lab(obj):
     else:
         return 0
 
+
 def int2color(integer, max_value=10):
     """
     Convert an integer to a distinct color using a colormap.
@@ -52,7 +53,8 @@ def select_images():
 
 # Helper function to update the title with the current label
 def update_title(target_obj):
-    plt.title(f"Click to select points - Current Label: {target_obj}. Press ""right"" or ""left"" or b to switch labels.")
+    plt.title(f"Current Label: {target_obj}. Press right or left "
+              "or b to switch labels, r to remove last.")
     plt.draw()
 
 
@@ -124,7 +126,6 @@ def annotate_image(image_path):
 
         update_title(target_obj)
 
-
     # Connect the click and key events
     cid_click = fig.canvas.mpl_connect('button_press_event', onclick)
     cid_key = fig.canvas.mpl_connect('key_press_event', onkey)
@@ -137,4 +138,3 @@ def annotate_image(image_path):
 
     # Return the points collected for each label
     return labeled_points
-
