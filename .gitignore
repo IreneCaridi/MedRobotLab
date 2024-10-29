@@ -1,4 +1,4 @@
-/sam2/
+
 # Default ignored files
 /shelf/
 /workspace.xml
@@ -8,3 +8,5 @@
 /dataSources/
 /dataSources.local.xml
 
+# sam2 folder
+/sam2/
