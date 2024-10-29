@@ -28,8 +28,9 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
 def main():
     """
         asks the user to select some image to run sam2 on. The user can then select points inside every image
-        belonging to different target classes, as well as points belonging to background.
-        WATCH-OUT: once a point is selected, you cannot remove it!!!
+        belonging to different target classes, as well as points belonging to background (bkg).
+        If 'r' is pressed, the last point in removed.
+        WATCH-OUT: per every image, one must select the same n° of points per target (except bkg)!!!
 
     """
 
@@ -81,6 +82,9 @@ def main():
         # batching points and labels
         pts_batch.append(pts)
         lbs_batch.append(lbs)
+
+    assert len(pts_batch[0]) != 0, "You must select at least 1 point..."
+
     try:
         predict_and_plot(predictor, imgs, pts_batch, lbs_batch, img_name=img_name)
     except ValueError:
