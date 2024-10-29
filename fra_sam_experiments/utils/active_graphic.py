@@ -111,7 +111,7 @@ def annotate_image(image_path):
             last = target_obj
             target_obj = 'bkg'
         elif event.key == 'r':
-            print(f'Removing last point')
+            print(f'Last point removed')
 
             # removing last point from list
             labeled_points = labeled_points[:-1]
