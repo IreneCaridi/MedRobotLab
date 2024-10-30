@@ -10,3 +10,6 @@
 
 # sam2 folder
 /sam2/
+
+#segmentation weights
+/matteo_convnextsam_exp/weights/
