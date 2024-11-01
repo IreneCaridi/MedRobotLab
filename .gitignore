@@ -13,3 +13,4 @@
 
 #segmentation weights
 /matteo_convnextsam_exp/weights/
+/matteo_convnextsam_exp/ConvNeXtSAM/runs/
