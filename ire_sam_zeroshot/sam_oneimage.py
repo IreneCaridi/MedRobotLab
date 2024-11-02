@@ -21,7 +21,7 @@ import numpy as np
 device = torch.device("cpu")
 print(f"Using device: {device}")
 
-# Define functions (as you already have)
+# Define utils (as you already have)
 np.random.seed(3)
 
 def show_mask(mask, ax, random_color=False, borders=True):
