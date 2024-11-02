@@ -84,7 +84,7 @@ def sam_function(image, predictor, input_box):
     #     multimask_output=True)
 
     # Predict using bbox
-    masks, scores, _ = predictor.predict(
+    masks, scores, logits = predictor.predict(
         point_coords=None,
         point_labels=None,
         box=input_box[None, :],
@@ -104,13 +104,13 @@ def sam_function(image, predictor, input_box):
     show_masks(image, masks, scores, box_coords=input_box)
 
 def convert_xywh_to_xyxy(bbox):
-    center_x, center_y, width, height = bbox
+    center_x, center_y, w, h = bbox
 
     # Calculate min and max coordinates
-    x_min = center_x
-    y_min = center_y
-    x_max = center_x + height
-    y_max = center_y + width
+    x_min = center_x - h/2
+    y_min = center_y - w/2
+    x_max = center_x + h/2
+    y_max = center_y + w/2
 
     return (x_min, y_min, x_max, y_max)
 
@@ -125,7 +125,7 @@ if __name__ == '__main__':
 
     # Define the directory containing images and annotation file
     image_folder = '../image/endoscapes/train'
-    annotation_path = '../../image/endoscapes/train/annotation_coco.json'
+    annotation_path = '../image/endoscapes/train/annotation_coco.json'
 
     # Get a list of all image files in the directory
     image_paths = glob(os.path.join(image_folder, '*.jpg'))
@@ -189,7 +189,7 @@ if __name__ == '__main__':
     for img_data in results[0:1]:
         image_path = os.path.join(image_folder, img_data['file_name'])
         print(image_path)
-        image = Image.open("../../image/endoscapes/train/8_14775.jpg")
+        image = Image.open("../image/endoscapes/train/8_14775.jpg")
         image = np.array(image.convert("RGB"))
         plt.figure(figsize=(10, 10))
         plt.imshow(image)
@@ -201,6 +201,7 @@ if __name__ == '__main__':
 
         for annotation in img_data["annotations"]:
             box = annotation["bbox"]
+            box = np.array(box)
 
             # Visualize the box on the image
             plt.figure(figsize=(10, 10))
