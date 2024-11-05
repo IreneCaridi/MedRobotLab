@@ -108,3 +108,4 @@ def predict_and_plot(model, img_batch, points_batch, label_batch, img_name=None)
     # Plotting
     show_batch(img_batch, label_batch, masks_batch, points_batch, scores_batch, img_name=img_name)
 
+

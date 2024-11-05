@@ -1,3 +1,4 @@
+# pycharm prj folder
 /.idea/
 
 # sam2 folder
@@ -6,3 +7,6 @@
 #segmentation weights
 /matteo_convnextsam_exp/weights/
 /matteo_convnextsam_exp/ConvNeXtSAM/runs/
+
+# data
+/fra_sam_experiments/data/
