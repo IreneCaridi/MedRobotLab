@@ -4,6 +4,9 @@
 # sam2 folder
 /sam2/
 
+#dataset
+/dataset/
+
 #segmentation weights
 /matteo_convnextsam_exp/weights/
 /matteo_convnextsam_exp/ConvNeXtSAM/runs/
