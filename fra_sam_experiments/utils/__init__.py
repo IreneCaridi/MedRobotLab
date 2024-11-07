@@ -21,3 +21,20 @@ def random_state(seed=36):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
 
+
+def integer_division(a: int, b: int, floor=False):
+    """
+
+    args:
+        -a: first term
+        -b: second term
+        -floor: if true returns division "per difetto", False returns "per eccesso"
+    :return:
+    """
+
+    if floor:
+        return a // b
+    else:
+        return a // b + 1
+
+

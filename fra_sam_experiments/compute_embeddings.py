@@ -18,7 +18,7 @@ from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 
 
-# Main function to run the tool
+
 def main():
 
     image_path = Path(r'C:\Users\franc\OneDrive - Politecnico di Milano\dataset_mmi\images\train')

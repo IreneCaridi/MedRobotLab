@@ -2,9 +2,132 @@ from sklearn.metrics import silhouette_samples, silhouette_score
 import matplotlib.pyplot as plt
 import numpy as np
 import faiss
+import torch
 
 
-def silhouette(data, labels):
+def pairwise_cosine_similarity(embedding: np.ndarray, gpu=True):
+    """
+    computes the pair-wise cosine similarity of a set of data
+
+    args:
+        -embedding: the data of shape (N, emb), where N is n° samples and emb is embedding dim to compute the similarity
+        -gpu: Whether to use gpu for computation (gpu may be chunked in use)
+    return:
+        -similarities: The matrix of shape (NxN) with pairwise similarities ordered inside each row in decreasing order
+                       i.e. the 1st column for each row it's the max similarity with the closest key
+        -idxs: matrix of shape (NxN) where each element is the index of the key which the similarity is computed to
+               i.e. for every row you have, at each column, the index of the corresponding key
+    """
+
+    max_k = 2048
+
+    embeddings = np.ascontiguousarray(embedding)
+    n_features = embeddings.shape[1]
+    n_samples = embeddings.shape[0]
+    faiss.normalize_L2(embeddings)
+    index = faiss.IndexFlatIP(n_features)
+    if gpu:
+        # using gpu
+        gpu_resources = faiss.StandardGpuResources()
+        index = faiss.index_cpu_to_gpu(gpu_resources, 0, index)
+
+        if n_samples > max_k:
+            # chunking at maximum K number...
+
+            cols = []
+
+            # creating a partition in chinks (list with dimentions)
+            q, r = divmod(n_samples, max_k)
+            partition = [max_k for _ in range(q)] + [r] if r != 0 else [max_k for _ in range(q)]
+
+            print(f'chunking with {len(q)} subsets...')
+
+            for i, p in enumerate(partition):
+                index.add(embeddings[max_k * i:max_k * i + p, :])
+                rows = []
+                for j, p1 in enumerate(partition):
+                    s, I = index.search(embeddings[max_k * i:max_k * i + p1, :], k=p)
+                    I = I + max_k*i
+                    rows.append((s, I))
+                index.reset()
+                cols.append((np.concatenate([x for x, _ in rows], 0), np.concatenate([x for _, x in rows], 0)))
+            similarities = np.concatenate([x for x, _ in cols], 1)
+            idxs = np.concatenate([x for _, x in cols], 1)
+        else:
+            index.add(embeddings)
+            similarities, idxs = index.search(embeddings, k=n_samples)
+    else:
+        index.add(embeddings)
+        similarities, idxs = index.search(embeddings, k=n_samples)
+
+    return similarities, idxs
+
+
+def cosine_similarity(q, k, corresponding_points=False, gpu=True):
+    """
+
+    it computes the cosine similarity between q and k (q * k')
+
+    args:
+        -q: query matrix of shape Nxemb where N is n° samples and emb is embedding dim
+        -k: key matrix of shape Mxemb where M is n° samples and emb is embedding dim
+        -corresponding_points: whether you just want row by row distances (corresponding points)
+                               WATCH-OUT: N should be equal to M
+        -gpu: whether to use gpu or not (cpu)
+    return:
+        -dot_products: a list containing the distances between q and k, if corresponding_points=True it is a list of
+                       len == N
+    """
+
+    accepted_inputs = [np.ndarray, torch.Tensor, list]
+
+    assert q not in accepted_inputs, f'q type {type(q)} not valid, pls use one of: {accepted_inputs}'
+    assert k not in accepted_inputs, f'k type {type(k)}not valid, pls use one of: {accepted_inputs}'
+
+    if not torch.is_tensor(q):
+        q = torch.tensor(q)
+    if not torch.is_tensor(k):
+        k = torch.tensor(k)
+
+    if gpu:
+        q.to('cuda:0')
+        k.to('cuda:0')
+
+    # l2 normalizing each row
+    q = torch.nn.functional.normalize(q, p=2, dim=-1)
+    k = torch.nn.functional.normalize(k, p=2, dim=-1)
+
+    dot_products = torch.matmul(q, k.T)
+
+    if corresponding_points:
+        assert not q.size == k.size, 'q and k has different sizes'
+        return list(torch.diagonal(dot_products).numpy())
+    else:
+        return dot_products
+
+
+def similarities(q, gpu=True):
+
+    BS = q.size()[0]
+    q = torch.nn.functional.normalize(q, p=2, dim=-1)
+    s = {}
+    if gpu:
+        q.to('cuda:0')
+    for i in range(BS):
+        for j in range(i + 1, BS):
+
+            similarity_matrix = torch.diagonal(torch.matmul(q[i], q[j].transpose(0, 1)).to(torch.float16))
+
+            if str(i) not in s.keys():
+                s[f'{i}'] = [(list(similarity_matrix.cpu().numpy()), j)]
+            else:
+                s[f'{i}'].append((list(similarity_matrix.cpu().numpy()), j))
+
+            del similarity_matrix
+    return s
+
+
+def silhouette(data: np.ndarray, labels: np.ndarray):
     """
     Compute silhouette scores for the given data points based on cosine similarity.
 
@@ -160,7 +283,7 @@ def compute_elbow(kmeans_model, embeddings, wcss, current_K_n, ax, return_D_I=Fa
         ax.set_ylabel("Distortion (Inertia)")
         ax.grid()
 
-    D, I = kmeans_model.index.search(embeddings, 1)  # Get distances
+    D, I = kmeans_model.index.search(faiss.normalize_L2(embeddings), 1)  # Get distances
     if spherical:
         wcss.append(np.sum(D))  # /D.shape[0]
     else:

@@ -12,8 +12,6 @@ class DummyLoader(torch.utils.data.Dataset):
         self.img_path = Path(img_path)
         self.data = self.load_imgs()
 
-
-
     def __len__(self):
         return len(self.data)
 
@@ -30,6 +28,7 @@ class DummyLoader(torch.utils.data.Dataset):
 
             img = np.array(Image.open(self.img_path / img).convert('RGB'))
             imgs.append(img)
+            break
         return imgs
 
 
