@@ -7,6 +7,16 @@ from PIL import Image
 import numpy as np
 
 
+def get_mask_from_json(json_path):
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+
+    masks = []
+    for m in range(len(data['shapes'])):
+        polygon_coords = np.array(data['shapes'][m]['points'])
+        masks.append(polygon_coords)
+
+    return [(masks, 0)]  # to be consistent with format I'm using to handle masks for images (0 => instrument)
 
 def plot_mask_from_json(image_path, json_path, ax):
     """

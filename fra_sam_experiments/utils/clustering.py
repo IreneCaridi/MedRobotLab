@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import faiss
 import torch
+from pathlib import Path
 
 
 def pairwise_similarity(embedding: np.ndarray, cosine=True, gpu=True):
@@ -456,11 +457,10 @@ def compute_Kmeans(emb: torch.Tensor, mode: list, clusters: list, min_points_per
                     _, _ = compute_elbow(kmeans, embeddings, n, axs[-1], return_D_I=True)
 
         if save_Ks_path:
-            torch.save(Ks, fr'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\{m}-wise_centroids.pth')
+            torch.save(Ks, Path(save_Ks_path) / f'{m}-wise_centroids.pth')
 
         if elbow_save_path:
-            f.savefig(fr'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\{m}-wise_elbow.png', dpi=100,
-                      bbox_inches='tight')
+            f.savefig(Path(elbow_save_path) / f'{m}-wise_elbow.png', dpi=100, bbox_inches='tight')
         Ks_full[f'{m}-wise'] = Ks
     if return_Ks:
         return Ks_full

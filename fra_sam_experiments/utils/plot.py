@@ -92,7 +92,7 @@ def show_batch(img_batch, labels_batch, masks_batch, points_batch, scores_batch,
 
 def predict_and_plot(model, img_batch, points_batch, label_batch, img_name=None):
     """
-    inputs:
+    inputs:plot_mask_over_image
           -model: loaded sam2 model
           -img_batch: img as list of RGB images (BS, w, h, 3)
           -points_batch: points as list of points per image (BS, n° points, 1, 2)

@@ -21,37 +21,65 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
 
 def main():
 
-    image_path = Path(r'C:\Users\franc\OneDrive - Politecnico di Milano\dataset_mmi\images\train')
-    images_names = [str(image_path / x) for x in sorted(os.listdir(image_path))]
+    img_paths = [Path(r'C:\Users\franc\OneDrive - Politecnico di Milano\dataset_mmi\images\train'),
+                   Path(r'D:\poli_onedrive_backup\dataset_mmi_3\dataset_mmi\images\train'),
+                   Path(r'D:\poli_onedrive_backup\AtlasDione_30fps'),
+                   Path(r'D:\poli_onedrive_backup\CholectInstanceSeg\train')]
+    names = ['mmi_2_train', 'mmi_3_train', 'AtlasDione_30fps', 'CholectInstanceSeg_train']
 
-    # setting up sam2
-    device = check_device()
+    dst = Path(r'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\cropped_640')
 
-    sam2_checkpoint = Path(parent_dir) / r'sam2\checkpoints\sam2.1_hiera_large.pt'
-    model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
+    for src, name in zip(img_paths, names):
 
-    sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device)
-    predictor = SAM2ImagePredictor(sam2_model)
+        # setting up sam2
+        device = check_device()
 
-    bs = 4
+        sam2_checkpoint = Path(parent_dir) / r'sam2\checkpoints\sam2.1_hiera_large.pt'
+        model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
-    embd_dict = {}
+        sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device)
+        predictor = SAM2ImagePredictor(sam2_model)
 
-    loader = torch.utils.data.DataLoader(DummyLoader(image_path), batch_size=bs, shuffle=False,
-                                         collate_fn=keep_unchanged)
+        bs = 4
 
-    for b, data in enumerate(loader):
+        embd_dict = {}
 
-        print(f'{b+1}/{len(loader)}')
+        if name in names[3:]:
+            for folder in os.listdir(src):
 
-        predictor.set_image_batch(data)
-        emb = predictor.get_image_embedding()
-        emb = emb.cpu()
+                images_names = [str(src / folder / x) for x in sorted(os.listdir(src / folder))]
 
-        for i in range(emb.size()[0]):
-            embd_dict[images_names[b*bs + i]] = emb[i, :, :, :]
+                loader = torch.utils.data.DataLoader(DummyLoader(src / folder, 'crop'), batch_size=bs, shuffle=False,
+                                                     collate_fn=keep_unchanged)
 
-    torch.save(embd_dict, r'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\mmi_2_train_embd.pth')
+                for b, data in enumerate(loader):
+
+                    print(f'{b+1}/{len(loader)}')
+
+                    predictor.set_image_batch(data)
+                    emb = predictor.get_image_embedding()
+                    emb = emb.cpu()
+
+                    for i in range(emb.size()[0]):
+                        embd_dict[images_names[b*bs + i]] = emb[i, :, :, :]
+        else:
+            images_names = [str(src / x) for x in sorted(os.listdir(src))]
+
+            loader = torch.utils.data.DataLoader(DummyLoader(src, 'crop'), batch_size=bs, shuffle=False,
+                                                 collate_fn=keep_unchanged)
+
+            for b, data in enumerate(loader):
+
+                print(f'{b + 1}/{len(loader)}')
+
+                predictor.set_image_batch(data)
+                emb = predictor.get_image_embedding()
+                emb = emb.cpu()
+
+                for i in range(emb.size()[0]):
+                    embd_dict[images_names[b * bs + i]] = emb[i, :, :, :]
+
+        torch.save(embd_dict, dst / f'{name}.pth')
 
 
 if __name__ == "__main__":
