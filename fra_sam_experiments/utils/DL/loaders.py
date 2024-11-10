@@ -28,7 +28,7 @@ class DummyLoader(torch.utils.data.Dataset):
 
             img = np.array(Image.open(self.img_path / img).convert('RGB'))
             imgs.append(img)
-            break
+
         return imgs
 
 

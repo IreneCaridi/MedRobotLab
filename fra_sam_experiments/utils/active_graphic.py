@@ -1,9 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 import cv2
-import numpy as np
 from . import random_state
 
 random_state()

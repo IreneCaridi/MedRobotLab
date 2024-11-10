@@ -1,9 +1,5 @@
-import tkinter as tk
-from tkinter import filedialog
-import cv2
+
 import numpy as np
-import torch
-from matplotlib import pyplot as plt
 import sys
 import os
 from PIL import Image

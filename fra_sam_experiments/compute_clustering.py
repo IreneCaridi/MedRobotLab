@@ -15,73 +15,61 @@ random_state()
 # root = tk.Tk()
 # root.title("Multiple Matplotlib Figures")
 
-clusters = [3, 10, 100, 200, 500, 1000]
-clusters = clusters[::-1]
+clusters = [2, 4, 10, 100, 200, 500, 1000, 2000]
+# clusters = clusters[::-1]
 
 print('loading data...')
-emb_dict = torch.load(r'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\mmi_old_train_embd.pth')
+emb_dict = torch.load(r'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\mmi_2_train_embd.pth')
 
-embeddings = torch.stack([emb_dict[x].view(emb_dict[x].size()[0], -1)
-                          for x in emb_dict.keys()]).view(emb_dict[list(emb_dict.keys())[0]].size()[0], -1)
+emb = torch.stack([emb_dict[x] for x in emb_dict.keys()])
+print(f" --> {emb.shape}, {emb.dtype}")  # shape [N, 256, 64, 64]
 
-# permuting to get Nx256 (256 = embedding size)
-embeddings = embeddings.permute(1, 0).numpy()
-print(f" --> {embeddings.shape}")
-
-
-figs = []
-axs = []
-
-# creatng K figures for siluhettes + 1 for elbow (last)
-for i in range(len(clusters)+1):
-    f, a = plt.subplots(1, 1, figsize=(12, 6))
-    figs.append(f)
-    axs.append(a)
-
-
-wcss = []
-for i, n in enumerate(clusters):
-    # Initialize FAISS K-means
-    kmeans = faiss.Kmeans(embeddings.shape[-1], n, max_points_per_centroid=embeddings.shape[0], niter=100,
-                          nredo=1, verbose=True, gpu=True, seed=36, spherical=True)
-    # Train the K-means model
-    print('running K-means...')
-    kmeans.train(embeddings)
-
-    # inertia for elbow
-    _, I = compute_elbow(kmeans, embeddings, wcss, n, axs[-1], return_D_I=True)
-
-    # siluhette
-    compute_siluhette(embeddings, I, axs[i])
-
-plt.show()
-
-# # Create a canvas to display the first figure
-# canvas1 = FigureCanvasTkAgg(fig1, master=root)
-# canvas1_widget = canvas1.get_tk_widget()
-# canvas1_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
-
-# # Get the centroids of the clusters
-# centroids = kmeans.centroids
-#
-# # assignments
-# D, I = kmeans.index.search(embeddings, 1)
-
-
-# DO SOMETHING LIKE THIS FOR ELBOW WHILE COMPUTING CLUSTERS AT DIFFERENT Ks
-
-# wcss = []
-# clusters = range(1, 11)
-#
-# for n in clusters:
-#     kmeans = faiss.Kmeans(d=embeddings.shape[1], k=n, niter=20, nredo=5)
-#     kmeans.train(embeddings)
-#
-#     # Inertia is the sum of squared distances to the nearest cluster center
-#     D, _ = kmeans.index.search(embeddings, 1)  # Get distances
-#     wcss.append(np.sum(D ** 2))  # WCSS = sum of squared distances
 
 #
-# print("Centroids:\n", centroids.shape)
-# print("Assigned cluster indices:\n", I.flatten().shape)
+# figs = []
+# axs = []
+
+# # creatng K figures for siluhettes + 1 for elbow (last)
+# for i in range(len(clusters)+1):
+#     f, a = plt.subplots(1, 1, figsize=(12, 6))
+#     figs.append(f)
+#     axs.append(a)
+#
+
+
+mode = ['pixel', 'channel', 'image']
+for m in mode:
+    Ks = {}
+    f, a = plt.subplots(1, 2, figsize=(19.2, 10.8), dpi=100)
+    f.suptitle(f'Elbow for {m}-wise cosine distance')
+    axs = [a]
+
+    if m == 'pixel':
+        embeddings = emb.permute(0, 2, 3, 1).reshape(-1, 256).numpy()
+    elif m == 'channel':
+        embeddings = emb.reshape(-1, 64*64).numpy()
+    else:  # image
+        embeddings = emb.reshape(emb.size()[0], -1).numpy()
+
+    for i, n in enumerate(clusters):
+        if n < embeddings.shape[0]:  # check if the n° of cluster is not bigger that the actual n° of samples
+            # Initialize FAISS K-means
+            faiss.normalize_L2(embeddings)
+            kmeans = faiss.Kmeans(embeddings.shape[-1], n, max_points_per_centroid=embeddings.shape[0], niter=50,
+                                  nredo=20, verbose=True, gpu=True, seed=36, spherical=True)
+            # Train the K-means model
+            print('running K-means...')
+            kmeans.train(embeddings)
+
+            Ks = {str(n): torch.Tensor(kmeans.centroids)}
+
+            # inertia for elbow
+            _, I = compute_elbow(kmeans, embeddings, n, axs[-1], return_D_I=True)
+
+            # # siluhette
+            # compute_siluhette(embeddings, I, axs[i])
+
+    torch.save(Ks, fr'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\{m}-wise_centroids.pth')
+    f.savefig(fr'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\{m}-wise_elbow.png', dpi=100, bbox_inches='tight')
+    # plt.show()
 

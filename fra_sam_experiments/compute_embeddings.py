@@ -51,7 +51,7 @@ def main():
         for i in range(emb.size()[0]):
             embd_dict[images_names[b*bs + i]] = emb[i, :, :, :]
 
-    torch.save(embd_dict, r'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\mmi_old_train_embd.pth')
+    torch.save(embd_dict, r'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\mmi_2_train_embd.pth')
 
 
 if __name__ == "__main__":

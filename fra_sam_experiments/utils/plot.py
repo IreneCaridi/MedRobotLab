@@ -1,8 +1,10 @@
 import numpy as np
 from matplotlib import pyplot as plt
 import cv2
-import torch
 from . import random_state
+import os
+from pathlib import Path
+
 
 random_state()
 
@@ -107,5 +109,4 @@ def predict_and_plot(model, img_batch, points_batch, label_batch, img_name=None)
 
     # Plotting
     show_batch(img_batch, label_batch, masks_batch, points_batch, scores_batch, img_name=img_name)
-
 
