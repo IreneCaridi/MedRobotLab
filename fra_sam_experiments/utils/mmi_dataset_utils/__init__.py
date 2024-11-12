@@ -2,17 +2,20 @@ import numpy as np
 from collections import defaultdict
 
 
-def load_masks(file_path, img_shape: tuple = (1080, 1920)):
+def get_mask_from_txt(file_path, img_shape: tuple = (1080, 1920), return_dict=False):
     """
     Loads polygonal mask annotations from txt and organizes them into a dictionary
-    of numpy arrays, grouped by class.
+    of numpy arrays, grouped by class or list of tuple with class - polygons coupling.
 
     args:
         - file_path: path to the text file containing mask annotations.
+        - img_shape: image shape as tuple
+        - return_dict: if True returns a dict else a list
 
-    Returns:
+    Returns: (exclusive)
         - mask_dict: dict, where keys are class labels and values are lists of numpy arrays
                      with shape (n_points, 2) for each polygon.
+        - mask_list: list, of len == N° classes where each entry is a tuple with (list of np.array polys, class_id).
     """
     mask_dict = defaultdict(list)
     y, x = img_shape
@@ -28,5 +31,10 @@ def load_masks(file_path, img_shape: tuple = (1080, 1920)):
             # Append polygon to the respective class list in the dictionary
             mask_dict[class_label].append(coordinates)
 
-    return mask_dict
+    mask_list = [(mask_dict[k], k) for k in mask_dict.keys()]
+
+    if return_dict:
+        return mask_dict
+    else:
+        return mask_list
 

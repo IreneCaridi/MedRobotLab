@@ -18,6 +18,7 @@ def get_mask_from_json(json_path):
 
     return [(masks, 0)]  # to be consistent with format I'm using to handle masks for images (0 => instrument)
 
+
 def plot_mask_from_json(image_path, json_path, ax):
     """
         For CholectInstanceSeg dataset plots mask over corresponding image on a specified ax object
