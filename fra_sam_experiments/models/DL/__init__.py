@@ -4,6 +4,7 @@ from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 import numpy as np
 from pathlib import Path
+import os
 
 
 # SETTING GLOBAL VARIABLES
@@ -676,4 +677,35 @@ class DistillatioModels(nn.Module):
         self.callbacks.on_end()
 
 
+# placing myself in sam2
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(str(Path(parent_dir) / 'sam2'))
 
+from sam2.build_sam import build_sam2
+from sam2.sam2_image_predictor import SAM2ImagePredictor
+
+
+class SAM2handler(nn.Module):
+    def __init__(self, sam2_checkpoint, model_cfg="configs/sam2.1/sam2.1_hiera_l.yaml", as_encoder=False):
+        super().__init__()
+
+        sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=torch.device('cpu'))
+
+        self.predictor = SAM2ImagePredictor(sam2_model)
+        self.as_encoder = as_encoder
+        self.model = self.predictor.model  # to account for the SAM2(nn.Model) being in predictor.model
+
+    def forward(self, x):
+        self.predictor.set_image_batch(x)
+        if self.as_encoder:
+            return self.predictor.get_image_embedding()
+        else:
+            # to be done:
+            # points_batch, label_batch = self.get_prompts()
+            # return self.predictor.predict_batch(points_batch, label_batch, multimask_output=False)
+            pass
+
+    def get_prompts(self):
+        pass
+        # fare cose

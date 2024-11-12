@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from pathlib import Path
 
-from models.DL import ModelClass, check_load_model
+from models.DL import DistillatioModels, check_load_model, SAM2handler
 from models.DL.common import Dummy, ConvNeXt, ConvNeXtSAM, ResNet1, ResNet2, ResNetTransform, ResNetTransform2, \
                              ResNetTransformerAtt, TransformerEncDec, ResUnet, ResUnetAtt, DarkNetCSP, ResUnetAtt2, \
                              DarkNetCSPBoth, LearnableInitBiLSTM, LearnableInitBiLSTM2, MLPdo, MLPatt, MLPattDo, MLP
@@ -20,6 +20,9 @@ from utils import random_state, increment_path, json_from_parser
 
 # setting all random states
 random_state(36)
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
 
 
 def main(args):
@@ -43,7 +46,6 @@ def main(args):
     else:
         num_classes = 3
 
-    bi_head_f = False
 
     # saving inputs
     json_from_parser(args, save_path)
@@ -62,16 +64,16 @@ def main(args):
     #     raise ValueError("data format not recognised")
 
     # model (ADJUST)
-    if "." not in args.model:
-        # means it is not a weight and has to be imported
-        if args.model == "Dummy":
-            model = Dummy(num_classes)
+    if "." not in args.student:
+        # means it is not a weight and has to be imported ADJUST => (NEED TO IMPORT IT)
+        if args.student == "Dummy":
+            stdent = Dummy(num_classes)
             # loading model = bla bla bla
         else:
             raise TypeError("Model name not recognised")
     else:
         # it is a weight
-        model = args.model
+        student = args.student
 
     # double-checking whether you parsed weights or model and accounting for transfer learning
     mod = check_load_model(model, args.backbone)
@@ -79,8 +81,7 @@ def main(args):
 
     # initializing callbacks ( could be handled more concisely i guess...)
     stopper = EarlyStopping(patience=args.patience, monitor="val_loss", mode="min")
-    saver = Saver(model=mod, save_best=True, save_path=save_path, monitor="val_loss",
-                  mode='min')
+    saver = Saver(model=mod, save_best=True, save_path=save_path, monitor="val_loss", mode='min')
     callbacks = Callbacks([stopper, saver])
 
     # initializing metrics
@@ -99,7 +100,6 @@ def main(args):
     # initializing loggers
     logger = Loggers(metrics=metrics, save_path=save_path, opt=opt, device=device, test=args.test)
 
-
     # lr scheduler
     sched = scheduler(opt, args.sched, args.lrf, epochs)
 
@@ -108,16 +108,26 @@ def main(args):
     # val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size, shuffle=True, collate_fn=padding_x)  # to pad
     # train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True, collate_fn=padding_x)  # to pad
 
+    # loading sam as teacher (SAM2_image_predictor instance -- SAM2(nn.module) is in teacher.model)
+    if args.as_encoder:
+        enc_flag = True
+    elif args.as_predictor:
+        enc_flag = False
+    teacher = SAM2handler(Path(parent_dir) / args.SAM2_weights, args.SAM2_configs, as_encoder=enc_flag)
+
     # building model (ADJUST)
-    model = ModelClass(mod, (train_loader, val_loader, test_loader), loss_fn=loss_fn, device=device, AMP=args.AMP,
-                       optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
-                       freeze=freeze_list, sequences=seq_flag, bi_head=bi_head_f)
+    model = DistillatioModels(student, teacher, (train_loader, val_loader), loss_fn=loss_fn, device=device, AMP=args.AMP,
+                       optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched)
+
+    model.train()
 
 if __name__ == "__main__":
 
     # list of arguments (ADJUST for student and SAM)
     parser = argparse.ArgumentParser(description="Parser")
-    parser.add_argument('--model', type=str, required=True, help='name of model to train or path to weights to train')
+    parser.add_argument('--student', type=str, required=True, help='name of model to train or path to weights to train')
+    parser.add_argument('--SAM2_weights', type=str, required=True, default= r'sam2\checkpoints\sam2.1_hiera_large.pt', help='path to SAM2 weights (from sam2 repo folder)')
+    parser.add_argument('--SAM2_configs', type=str, required=True, default="configs/sam2.1/sam2.1_hiera_l.yaml", help='path to SAM2 configs (from sam2 repo folder)')
     parser.add_argument('--backbone', type=str, default=None, help='path to backbone weights, if present it ONLY loads weights for it')
     parser.add_argument('--epochs', type=int, required=True, help='number of epochs')
     parser.add_argument('--batch_size', type=int, required=True, help='batch size')
@@ -144,6 +154,9 @@ if __name__ == "__main__":
     # group.add_argument('--crops', action="store_true", help='whether to use Crops dataset')
     # group.add_argument('--crops_raw', action="store_true", help='whether to use Crops_raw dataset (extracted from raw signal)')
 
+    group1 = parser.add_mutually_exclusive_group(required=True)
+    group1.add_argument('--as_encoder', action="store_true", help='whether to do encoder KD')
+    group1.add_argument('--as_predictor', action="store_true", help='whether to do masks KD')
 
     args = parser.parse_args()
 
