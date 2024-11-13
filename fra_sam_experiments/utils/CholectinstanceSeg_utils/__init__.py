@@ -36,15 +36,17 @@ def plot_mask_from_json(image_path, json_path, ax):
     # Open image
     image = Image.open(image_path)
 
+    ax.imshow(image)
+    ax.set_title(f'{Path(image_path).name}')
+
     for m in range(len(data['shapes'])):
-        polygon_coords = np.array(data['shapes'][m]['points'])
+        if data['shapes'][m]['points']:
+            polygon_coords = np.array(data['shapes'][m]['points'])
 
-        ax.imshow(image)
+            # Plot polygon
+            polygon = Polygon(polygon_coords, closed=True, edgecolor='black', facecolor='red', alpha=0.4)
+            ax.add_patch(polygon)
 
-        # Plot polygon
-        polygon = Polygon(polygon_coords, closed=True, edgecolor='black', facecolor='red', alpha=0.4)
-        ax.add_patch(polygon)
-        ax.set_title(f'{Path(image_path).name}')
 
 
 def random_plot_from_json(dataset_path, n=6):
