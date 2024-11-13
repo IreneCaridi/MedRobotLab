@@ -74,3 +74,27 @@ def json_from_parser(parser_args, save_path, name="arguments.json"):
     save_path = save_path / name
     with open(save_path, 'w') as json_file:
         json.dump(args_dict, json_file, indent=2)
+
+
+def conv2d_output_dim(input_dim, kernel_size, padding, stride):
+
+    # Formula for output dimensions
+    output = ((input_dim + 2 * padding - kernel_size) // stride) + 1
+
+    return output
+
+
+def compute_padding(input_size, target_size, kernel_size, stride):
+    # Ensure the kernel size and stride are integers
+    k = kernel_size
+    s = stride
+
+    # Calculate the necessary padding for both height and width
+    padding = ((target_size - 1) * s - input_size + k) / 2
+
+    # Check if padding is an integer and non-negative
+    if padding.is_integer() and padding >= 0:
+        return int(padding)
+    else:
+        return "No valid padding found for the given input and target size with specified kernel and stride."
+

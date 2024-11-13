@@ -5,7 +5,7 @@ from tqdm import tqdm
 import numpy as np
 from pathlib import Path
 import os
-
+import sys
 
 # SETTING GLOBAL VARIABLES
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'
@@ -425,8 +425,8 @@ def check_load_model(model, backbone_weights):
 
 
 class DistillatioModels(nn.Module):
-    def __init__(self, teacher, student, loaders, device='cpu', callbacks=None, loss_fn=None, optimizer=None, sched=None,
-                 metrics=None, loggers=None, AMP=True):
+    def __init__(self, student, teacher, loaders, device='cpu', callbacks=None, loss_fn=None, optimizer=None, sched=None,
+                 metrics=None, loggers=None, AMP=True, as_encoder=True):
         super().__init__()
         """
         :param
@@ -491,6 +491,7 @@ class DistillatioModels(nn.Module):
         else:
             self.AMP = False
 
+        self.encoder_only_teacher = as_encoder
 
     def train_one_epoch(self,epoch_index,tot_epochs):
         running_loss = 0.
@@ -506,15 +507,22 @@ class DistillatioModels(nn.Module):
             torch.cuda.empty_cache()  # Clear GPU memory
             gpu_used = torch.cuda.max_memory_allocated() / (1024 ** 3)
 
+            if self.encoder_only_teacher:
+                inputs = data
+            else:
+                inputs, labs = data
+                labs = labs.to(self.device)
 
-            inputs, labs = data
+            sam_in = [x.numpy() for x in inputs.permute(0, 2, 3, 1)]
             inputs = inputs.to(self.device)
-            # labs = labs.to(self.device)
+
+            if batch == 0:
+                print(len(sam_in), sam_in[0].shape)
 
             self.opt.zero_grad()
 
             with torch.no_grad():
-                teacher_out = self.teacher(inputs)
+                teacher_out = self.teacher(sam_in)
 
             if self.AMP:
                 with autocast():
@@ -533,7 +541,7 @@ class DistillatioModels(nn.Module):
                 loss.backward()
                 self.opt.step()
 
-            del inputs
+            del inputs, sam_in
 
             running_loss += loss.item()
             last_loss = running_loss #/ self.train_loader.batch_size  # loss per batch
@@ -546,19 +554,12 @@ class DistillatioModels(nn.Module):
                 self.callbacks.on_train_batch_end(student_out.float(), teacher_out, batch)
 
             # updating pbar
-            if self.metrics.num_classes != 2:
-                A = self.metrics.A.t_value_mean
-                P = self.metrics.P.t_value_mean
-                R = self.metrics.R.t_value_mean
-                AUC = self.metrics.AuC.t_value_mean
+            if self.encoder_only_teacher:
+                pbar_loader.set_description(f'Epoch {epoch_index}/{tot_epochs-1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
+                                            f'train_loss (mse): {last_loss:.4f}')
             else:
-                A = self.metrics.A.t_value_mean
-                P = self.metrics.P.t_value[1]
-                R = self.metrics.R.t_value[1]
-                AUC = self.metrics.AuC.t_value[1]
+                raise AttributeError('training with decoder not yet implementeeeeeeddddddd.....')
 
-            pbar_loader.set_description(f'Epoch {epoch_index}/{tot_epochs-1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
-                                        f'train_loss: {last_loss:.4f}, A: {A :.2f}, P: {P :.2f}, R: {R :.2f}, AUC: {AUC :.2f}')
             if self.device != "cpu":
                 torch.cuda.synchronize()
 
@@ -586,12 +587,19 @@ class DistillatioModels(nn.Module):
             for batch, data in pbar_loader:
                 torch.cuda.empty_cache()  # Clear GPU memory
 
-                inputs, labels = data
+                if self.encoder_only_teacher:
+                    inputs = data
+                else:
+                    inputs, labels = data
+                    labels = labels.to(self.device)
+
+                sam_in = [x.numpy() for x in inputs.permute(0, 2, 3, 1)]
                 inputs = inputs.to(self.device)
-                labels = labels.to(self.device)
 
                 student_out = self.student(inputs)
-                teacher_out = self.teacher(inputs)
+                teacher_out = self.teacher(sam_in)
+
+                del inputs, sam_in
 
                 loss = self.loss_fun(student_out, teacher_out)
 
@@ -610,18 +618,10 @@ class DistillatioModels(nn.Module):
                 self.loggers.on_val_batch_end(student_out, teacher_out, batch)
 
                 # updating pbar
-                if self.metrics.num_classes != 2:
-                    A = self.metrics.A.v_value_mean
-                    P = self.metrics.P.v_value_mean
-                    R = self.metrics.R.v_value_mean
-                    AUC = self.metrics.AuC.v_value_mean
+                if self.encoder_only_teacher:
+                    description = f'Validation: val_loss (mse): {last_loss:.4f}'
                 else:
-                    A = self.metrics.A.v_value_mean
-                    P = self.metrics.P.v_value[1]
-                    R = self.metrics.R.v_value[1]
-                    AUC = self.metrics.AuC.v_value[1]
-                description = f'Validation: val_loss: {last_loss:.4f}, val_A: {A :.2f}, ' \
-                              f'val_P: {P :.2f}, val_R: {R :.2f}, val_AUC: {AUC :.2f}'
+                    raise AttributeError('not yet implemented the detectorrrr')
                 pbar_loader.set_description(description)
 
         if student_out is not None:
@@ -679,8 +679,9 @@ class DistillatioModels(nn.Module):
 
 # placing myself in sam2
 current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
+parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
 sys.path.append(str(Path(parent_dir) / 'sam2'))
+
 
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
@@ -690,11 +691,13 @@ class SAM2handler(nn.Module):
     def __init__(self, sam2_checkpoint, model_cfg="configs/sam2.1/sam2.1_hiera_l.yaml", as_encoder=False):
         super().__init__()
 
+        print('loading SAM...')
         sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=torch.device('cpu'))
 
         self.predictor = SAM2ImagePredictor(sam2_model)
         self.as_encoder = as_encoder
         self.model = self.predictor.model  # to account for the SAM2(nn.Model) being in predictor.model
+        print('SAM loaded...')
 
     def forward(self, x):
         self.predictor.set_image_batch(x)

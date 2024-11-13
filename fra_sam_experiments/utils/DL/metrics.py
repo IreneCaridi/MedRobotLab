@@ -121,12 +121,13 @@ class Metrics(BaseCallback):
 
         """
 
-        self.A = Accuracy(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
-        self.P = Precision(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
-        self.R = Recall(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
-        self.AuC = AUC(num_classes=num_classes, device=device, thresh=None)
-        self.metrics = [self.A, self.P, self.R, self.AuC]
-        self.build_metrics_dict()
+        # self.A = Accuracy(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
+        # self.P = Precision(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
+        # self.R = Recall(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
+        # self.AuC = AUC(num_classes=num_classes, device=device, thresh=None)
+        # self.metrics = [self.A, self.P, self.R, self.AuC]
+        self.metrics = []
+        self.dict = self.build_metrics_dict()
         self.num_classes = num_classes
 
     def on_train_batch_end(self, output=None, target=None, batch=None):
@@ -164,7 +165,7 @@ class Metrics(BaseCallback):
         keys = ["train_"+name for name in names]
         keys.extend(["val_"+name for name in names])
 
-        setattr(self, "dict", {key: None for key in keys})
+        return {key: None for key in keys}
 
 
 

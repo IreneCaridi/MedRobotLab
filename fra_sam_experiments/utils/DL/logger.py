@@ -16,16 +16,18 @@ class LogsHolder(BaseCallback):
     def __init__(self, metrics, test=False):
         super().__init__()
         self.metrics = metrics
-        self.build_metrics_dict()
+        self.dict = self.build_metrics_dict()
         self.test = test
 
     def build_metrics_dict(self):
-        setattr(self, "dict", {key: [] for key in self.metrics.dict})
-        dummy = self.dict.copy()
+        d = {key: [] for key in self.metrics.dict}
+        dummy = d.copy()
         for key in dummy:
             if "loss" not in key:
                 for i in range(self.metrics.num_classes):
-                    self.dict[key+f"_{i}"] = []
+                    d[key+f"_{i}"] = []
+        return d
+
 
     def on_epoch_end(self, epoch=None):
         if not self.test:
@@ -359,9 +361,9 @@ class Loggers(BaseCallback):
         self.csv = SaveCSV(self.logs, save_path, test=test)
         self.lr = LrLogger(opt, save_path)
         self.figure_saver = SaveFigures(self.logs, save_path)
-        self.ROC = ROClogger(save_path, num_classes=metrics.num_classes, device=device)
-        self.PRC = PRClogger(save_path, num_classes=metrics.num_classes, device=device)
-        self.cm = ConfusionMatrixLogger(save_path, metrics.num_classes, device)
+        # self.ROC = ROClogger(save_path, num_classes=metrics.num_classes, device=device)
+        # self.PRC = PRClogger(save_path, num_classes=metrics.num_classes, device=device)
+        # self.cm = ConfusionMatrixLogger(save_path, metrics.num_classes, device)
         self.build_list()
 
     def on_epoch_end(self, epoch=None):

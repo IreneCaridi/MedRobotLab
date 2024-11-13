@@ -9,7 +9,7 @@ from .utility_blocks import LayerNorm, DropPath, SelfAttentionModule, LayerScale
 class CNeXtStem(nn.Module):
     def __init__(self, c1, c2, k=4, s=4, p=0):
         super().__init__()
-        self.conv = nn.Conv1d(c1, c2, k, s, p)
+        self.conv = nn.Conv2d(c1, c2, k, s, p)
         self.norm = LayerNorm(c2)
 
     def forward(self, x):
@@ -22,10 +22,10 @@ class CNeXtBlock(nn.Module):  #come paper
         c_ = 4 * dim
         self.act = nn.GELU()
         self.add = shortcut
-        self.dwconv = nn.Conv1d(dim, dim, kernel_size=k, padding=p, groups=dim) # depthwise conv
+        self.dwconv = nn.Conv2d(dim, dim, kernel_size=k, padding=p, groups=dim) # depthwise conv
         self.norm = LayerNorm(dim)
-        self.pwconv1 = nn.Conv1d(dim, c_, 1, 1, 0) # pointwise/1x1 convs, implemented with linear layers
-        self.pwconv2 = nn.Conv1d(c_, dim, 1, 1, 0)
+        self.pwconv1 = nn.Conv2d(dim, c_, 1, 1, 0) # pointwise/1x1 convs, implemented with linear layers
+        self.pwconv2 = nn.Conv2d(c_, dim, 1, 1, 0)
         # layer scale
         self.gamma = LayerScale(layer_scale_init_value, dim) if layer_scale_init_value > 0 else None
 
@@ -52,7 +52,7 @@ class CNeXtDownSample(nn.Module):
     def __init__(self, c1, c2, k, s, p):
         super().__init__()
         self.norm = LayerNorm(c1)
-        self.layer = nn.Conv1d(c1, c2, k, s, p)
+        self.layer = nn.Conv2d(c1, c2, k, s, p)
 
     def forward(self, x):
         x = self.layer(self.norm(x))
@@ -60,18 +60,18 @@ class CNeXtDownSample(nn.Module):
 
 
 class ConvNormAct(nn.Module):
-    def __init__(self, c1, c2, k, s, p, act=nn.ReLU(), norm=nn.BatchNorm1d):
+    def __init__(self, c1, c2, k, s, p, act=nn.ReLU(), norm=nn.BatchNorm2d):
         super().__init__()
         self.act = act
         self.norm = norm(c2)
-        self.conv = nn.Conv1d(c1, c2, k, s, p)
+        self.conv = nn.Conv2d(c1, c2, k, s, p)
 
     def forward(self, x):
         return self.act(self.norm(self.conv(x)))
 
 
 class ResBlock(nn.Module):
-    def __init__(self, c1, k=5, s=1, p=2, act=nn.ReLU(), norm=nn.BatchNorm1d):
+    def __init__(self, c1, k=5, s=1, p=2, act=nn.ReLU(), norm=nn.BatchNorm2d):
         super().__init__()
 
         self.m = nn.Sequential(ConvNormAct(c1, c1//2, 1, 1, 0, act, norm),
@@ -84,10 +84,10 @@ class ResBlock(nn.Module):
 
 
 class ResBlockDP(nn.Module):
-    def __init__(self, c1, k=5, s=1, p=2, dp=0.1, act=nn.ReLU(), norm=nn.BatchNorm1d):
+    def __init__(self, c1, k=5, s=1, p=2, dp=0.1, act=nn.ReLU(), norm=nn.BatchNorm2d):
         super().__init__()
 
-        self.dp = nn.Dropout1d(dp)
+        self.dp = nn.Dropout2d(dp)
         self.m = nn.Sequential(self.dp,
                                ConvNormAct(c1, c1//2, 1, 1, 0, act, norm),
                                ConvNormAct(c1//2, c1//2, k, s, p, act, norm),
@@ -143,12 +143,12 @@ class TransformerBlock(nn.Module):
 #  Stolen from YOLO repo
 class SPPF(nn.Module):
     # Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher
-    def __init__(self, c1, c2, k=5, act=nn.ReLU(), norm=nn.BatchNorm1d):  # equivalent to SPP(k=(5, 9, 13))
+    def __init__(self, c1, c2, k=5, act=nn.ReLU(), norm=nn.BatchNorm2d):  # equivalent to SPP(k=(5, 9, 13))
         super().__init__()
         c_ = c1 // 2  # hidden channels
         self.cv1 = ConvNormAct(c1, c_, 1, 1, 0, act, norm)
         self.cv2 = ConvNormAct(c_ * 4, c2, 1, 1, 0, act, norm)
-        self.m = nn.MaxPool1d(kernel_size=k, stride=1, padding=k // 2)
+        self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
 
     def forward(self, x):
 
@@ -162,7 +162,7 @@ class SPPF(nn.Module):
 
 class C3(nn.Module):
     # CSP Bottleneck with 3 convolutions
-    def __init__(self, c1, c2, n, shortcut=True, e=0.5, act=nn.SiLU(), norm=nn.BatchNorm1d):  # ch_in, ch_out, number, shortcut, groups, expansion
+    def __init__(self, c1, c2, n, shortcut=True, e=0.5, act=nn.SiLU(), norm=nn.BatchNorm2d):  # ch_in, ch_out, number, shortcut, groups, expansion
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = ConvNormAct(c1, c_, 1, 1, 0, act=act, norm=norm)
@@ -176,7 +176,7 @@ class C3(nn.Module):
 
 class Bottleneck(nn.Module):
     # Standard bottleneck
-    def __init__(self, c1, c2, shortcut=True, e=0.5, act=nn.SiLU(), norm=nn.BatchNorm1d):  # ch_in, ch_out, shortcut, groups, expansion
+    def __init__(self, c1, c2, shortcut=True, e=0.5, act=nn.SiLU(), norm=nn.BatchNorm2d):  # ch_in, ch_out, shortcut, groups, expansion
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
         self.cv1 = ConvNormAct(c1, c_, 1, 1, 0, act=act, norm=norm)

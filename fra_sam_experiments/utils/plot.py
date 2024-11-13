@@ -22,9 +22,9 @@ def show_mask(mask, ax, random_color=False, borders = True):
         color = np.array([30/255, 144/255, 255/255, 0.6])
     h, w = mask.shape[-2:]
     mask = mask.astype(np.uint8)
-    mask_image =  mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
+    mask_image = mask.reshape(h) * color.reshape(1, 1, -1)
     if borders:
-        contours, _ = cv2.findContours(mask.reshape(h, w, 1),cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        contours, _ = cv2.findContours(mask.reshape(h), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         # Try to smooth contours
         contours = [cv2.approxPolyDP(contour, epsilon=0.01, closed=True) for contour in contours]
         mask_image = cv2.drawContours(mask_image, contours, -1, (1, 1, 1, 0.5), thickness=2)

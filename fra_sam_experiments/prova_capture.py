@@ -40,8 +40,8 @@ def main():
     # setting up sam2
     device = check_device()
 
-    sam2_checkpoint = Path(parent_dir) / r'sam2\checkpoints\sam2.1_hiera_large.pt'
-    model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
+    sam2_checkpoint = Path(parent_dir) / r'sam2\checkpoints\sam2.1_hiera_tiny.pt'
+    model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
 
     sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device)
     predictor = SAM2ImagePredictor(sam2_model)

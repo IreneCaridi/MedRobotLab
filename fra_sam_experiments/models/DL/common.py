@@ -8,18 +8,18 @@ from .utility_blocks import SelfAttentionModule, PatchMerging, PatchExpanding, L
 
 
 class Dummy(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self):
         super().__init__()
-        self.stem = ConvNormAct(1, 64, 5, 2, 2)
-        self.a = ResBlock(64)
-        self.b = ResBlock(64)
-
-        self.fc = nn.Linear(64, num_classes)
+        self.stem = ConvNormAct(3, 64, 6, 2, 2)
+        self.a = ConvNormAct(64, 128, 6, 2, 2)
+        self.b = ConvNormAct(128, 256, 6, 2, 2)
+        self.start_h = (80 - 64) // 2  # 8
+        self.start_w = (80 - 64) // 2  # 8
 
     def forward(self,x):
         x = self.b(self.a(self.stem(x)))
 
-        return self.fc(x.mean(dim=2).view(x.shape[0], -1)) # x.mean is GAP
+        return x[:, :, self.start_h:self.start_h + 64, self.start_w:self.start_w + 64]
 
 
 class ConvNeXt(nn.Module):

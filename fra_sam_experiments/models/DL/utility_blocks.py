@@ -57,10 +57,10 @@ class LayerScale(nn.Module):
 class SelfAttentionModule(nn.Module):
     def __init__(self, c_in, k=9, s=1, p=4):
         super().__init__()
-        self.conv = nn.Conv1d(c_in, 1, 1, 1)
-        self.spatial = nn.Sequential(nn.Conv1d(1, 32, k, s, p),
+        self.conv = nn.Conv2d(c_in, 1, 1, 1)
+        self.spatial = nn.Sequential(nn.Conv2d(1, 32, k, s, p),
                                      nn.ReLU(),
-                                     nn.Conv1d(32, 1, k, s, p)
+                                     nn.Conv2d(32, 1, k, s, p)
                                      )
         self.act = nn.Sigmoid()
 
@@ -80,7 +80,7 @@ class SelfAttentionModuleFC(nn.Module):
     def __init__(self, c_in, d_lin, return_map=False):
         super().__init__()
         self.return_map = return_map
-        self.conv = nn.Conv1d(c_in, 1, 1, 1)
+        self.conv = nn.Conv2d(c_in, 1, 1, 1)
         self.spatial = nn.Sequential(nn.Linear(d_lin, d_lin//4),
                                      nn.ReLU(),
                                      nn.Linear(d_lin//4, d_lin)
