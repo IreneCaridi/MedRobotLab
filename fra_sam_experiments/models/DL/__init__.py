@@ -467,7 +467,7 @@ class DistillatioModels(nn.Module):
 
         print(f"loading models to device: {self.device}")
         self.student.to(self.device)
-        self.teacher.to(self.device)
+        # self.teacher.to(self.device)  # I'm moving dynamically in train_one_epoch
 
         # freezing the whole teacher.
         self.teacher.eval()
@@ -516,14 +516,14 @@ class DistillatioModels(nn.Module):
             sam_in = [x.numpy() for x in inputs.permute(0, 2, 3, 1)]
             inputs = inputs.to(self.device)
 
-            if batch == 0:
-                print(len(sam_in), sam_in[0].shape)
-
             self.opt.zero_grad()
 
+            # self.teacher.to(self.device)
             with torch.no_grad():
                 teacher_out = self.teacher(sam_in)
+            # self.teacher.to('cpu')
 
+            # self.student.to(self.device)
             if self.AMP:
                 with autocast():
 
@@ -540,6 +540,8 @@ class DistillatioModels(nn.Module):
                 loss = self.loss_fun(student_out, teacher_out)
                 loss.backward()
                 self.opt.step()
+
+            # self.student.to('cpu')
 
             del inputs, sam_in
 
@@ -596,8 +598,13 @@ class DistillatioModels(nn.Module):
                 sam_in = [x.numpy() for x in inputs.permute(0, 2, 3, 1)]
                 inputs = inputs.to(self.device)
 
-                student_out = self.student(inputs)
+                # self.teacher.to(self.device)
                 teacher_out = self.teacher(sam_in)
+                # self.teacher.to('cpu')
+
+                # self.student.to(self.device)
+                student_out = self.student(inputs)
+                # self.student.to('cpu')
 
                 del inputs, sam_in
 
@@ -648,8 +655,6 @@ class DistillatioModels(nn.Module):
             # 1 epoch train
             self.train_one_epoch(epoch, num_epochs)
 
-            # reshuffle for subsampling
-            self.val_loader.dataset.build()
             # validation
             self.val_loop(epoch)
 
@@ -691,7 +696,7 @@ class SAM2handler(nn.Module):
     def __init__(self, sam2_checkpoint, model_cfg="configs/sam2.1/sam2.1_hiera_l.yaml", as_encoder=False):
         super().__init__()
 
-        print('loading SAM...')
+        print(f'loading {Path(model_cfg).stem}...')
         sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=torch.device('cpu'))
 
         self.predictor = SAM2ImagePredictor(sam2_model)

@@ -107,14 +107,14 @@ class SaveFigures(BaseCallback):
         self.save_metrics()
 
     def save_metrics(self):
-        fig, axes = plt.subplots(nrows=2, ncols=3, figsize= (20, 11))
+        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(20, 11))
 
-        self.plot_metric("val_loss", axes[0,0])
-        self.plot_metric("Accuracy", axes[0, 1])
-        self.plot_metric("Precision", axes[0, 2])
-        self.plot_metric("train_loss", axes[1, 0])
-        self.plot_metric("AUC", axes[1, 1])
-        self.plot_metric("Recall", axes[1, 2])
+        self.plot_metric("val_loss", axes[0])
+        # self.plot_metric("Accuracy", axes[0, 1])
+        # self.plot_metric("Precision", axes[0, 2])
+        self.plot_metric("train_loss", axes[1])
+        # self.plot_metric("AUC", axes[1, 1])
+        # self.plot_metric("Recall", axes[1, 2])
 
         fig.tight_layout()
         plt.savefig(self.save_path / self.name, dpi=96)
