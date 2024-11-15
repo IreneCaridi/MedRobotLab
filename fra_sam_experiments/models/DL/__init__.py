@@ -467,7 +467,7 @@ class DistillatioModels(nn.Module):
 
         print(f"loading models to device: {self.device}")
         self.student.to(self.device)
-        # self.teacher.to(self.device)  # I'm moving dynamically in train_one_epoch
+        self.teacher.to(self.device)  # I'm moving dynamically in train_one_epoch
 
         # freezing the whole teacher.
         self.teacher.eval()
@@ -673,8 +673,6 @@ class DistillatioModels(nn.Module):
             except StopIteration:  # (early stopping)
                 print(f"early stopping at epoch {epoch}")
                 break
-
-        # self.loggers.on_epoch_end(0)
 
         # logging metrics images
         self.loggers.on_end()

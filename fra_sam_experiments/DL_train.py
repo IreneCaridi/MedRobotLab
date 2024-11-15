@@ -8,7 +8,9 @@ from pathlib import Path
 from models.DL import DistillatioModels, check_load_model, SAM2handler
 from models.DL.common import Dummy, ConvNeXt, ConvNeXtSAM, ResNet1, ResNet2, ResNetTransform, ResNetTransform2, \
                              ResNetTransformerAtt, TransformerEncDec, ResUnet, ResUnetAtt, DarkNetCSP, ResUnetAtt2, \
-                             DarkNetCSPBoth, LearnableInitBiLSTM, LearnableInitBiLSTM2, MLPdo, MLPatt, MLPattDo, MLP
+                             DarkNetCSPBoth, LearnableInitBiLSTM, LearnableInitBiLSTM2, MLPdo, MLPatt, MLPattDo, MLP, \
+                             UNetEncoderTrain, UNet
+from models.DL.Rep_ViT import RepViT
 from utils.DL.callbacks import Callbacks, EarlyStopping, Saver
 from utils.DL.loaders import load_all
 from utils.DL.optimizers import get_optimizer, scheduler
@@ -37,6 +39,7 @@ def main(args):
     epochs = args.epochs
     batch_size = args.batch_size
     device = args.device
+    out_classes = args.n_class + 1  # +1 for bkg
 
     if args.as_encoder:
         enc_flag = True
@@ -55,14 +58,19 @@ def main(args):
     assert args.reshape_mode and args.reshape_size, 'both --reshape_size and --reshape_mode are needed together...'
 
     # loading dataset already as iterable torch loaders (train, val ,(optional) test)
-    loaders = load_all(data_paths, args.reshape_mode, args.reshape_size, batch_size, test_flag=False, use_label=not enc_flag)
+    loaders = load_all(data_paths, args.reshape_mode, args.reshape_size, batch_size, test_flag=False,
+                       use_label=not enc_flag)
 
     # model (ADJUST)
     if "." not in args.student:
         # means it is not a weight and has to be imported ADJUST => (NEED TO IMPORT IT)
         if args.student == "Dummy":
             student = Dummy()
+        elif args.student == 'UNetEncoderTrain':
+            student = UNetEncoderTrain()
             # loading model = bla bla bla
+        elif args.student == 'RepViT':
+            student = RepViT('m1', args.reshape_size, )
         else:
             raise TypeError("Model name not recognised")
     else:
@@ -71,7 +79,6 @@ def main(args):
 
     # double-checking whether you parsed weights or model and accounting for transfer learning
     mod = check_load_model(student, args.backbone)
-
 
     # initializing callbacks ( could be handled more concisely i guess...)
     stopper = EarlyStopping(patience=args.patience, monitor="val_loss", mode="min")
@@ -87,7 +94,7 @@ def main(args):
     # else:
     #     weights = None
 
-    # initializing loss and optimizer (ADJUST)
+    # initializing loss and optimizer
     if enc_flag:
         loss_fn = nn.MSELoss(reduction="mean")
     else:
@@ -126,9 +133,12 @@ if __name__ == "__main__":
     parser.add_argument('--SAM2_configs', type=str, default="configs/sam2.1/sam2.1_hiera_l.yaml", help='path to SAM2 configs (from sam2 repo folder)')
     parser.add_argument('--backbone', type=str, default=None, help='path to backbone weights, if present it ONLY loads weights for it')
 
+    # classes (excluding bkg)
+    parser.add_argument('--n_class', type=int, default=3, help='the number of classes to segment (excluding bkg)')
+
     # reshaping BOTH needed
     parser.add_argument('--reshape_mode', type=str, default='crop', choices=[None, 'crop', 'pad'], help=" how to handle resize")
-    parser.add_argument('--reshape_size', type=int, default=640, help='the finel shape input to model')
+    parser.add_argument('--reshape_size', type=int, default=512, help='the finel shape input to model')
 
     parser.add_argument('--epochs', type=int, required=True, help='number of epochs')
     parser.add_argument('--batch_size', type=int, required=True, help='batch size')
@@ -147,7 +157,7 @@ if __name__ == "__main__":
     # probably not userfull
     parser.add_argument('--weighted_loss', action="store_true", help='whether to weight the loss and weight for classes')
 
-    # datasets
+    # datasets (ok they have 3 names but actually its just because I have 3 paths...)
     parser.add_argument('--MMI', type=str, default=None, help='path to MMI dataset')
     parser.add_argument('--Cholect', type=str, default=None, help='path to Cholect dataset')
     parser.add_argument('--AtlasDione', type=str, default=None, help='path to AtlasDione dataset')

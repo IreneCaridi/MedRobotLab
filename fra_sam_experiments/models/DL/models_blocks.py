@@ -60,7 +60,7 @@ class CNeXtDownSample(nn.Module):
 
 
 class ConvNormAct(nn.Module):
-    def __init__(self, c1, c2, k, s, p, act=nn.ReLU(), norm=nn.BatchNorm2d):
+    def __init__(self, c1, c2, k, s, p, act=nn.ReLU, norm=nn.BatchNorm2d):
         super().__init__()
         self.act = act
         self.norm = norm(c2)
@@ -185,3 +185,59 @@ class Bottleneck(nn.Module):
 
     def forward(self, x):
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+#        NUOVIIIII
+# ----------------------------------------------------------------------------------------------------------------------
+#  params = {'in_chns': in_chns,
+#                   'feature_chns': [16, 32, 64, 128, 256],
+#                   'dropout': [0.05, 0.1, 0.2, 0.3, 0.5],
+#                   'class_num': class_num,
+#                   'bilinear': False,
+#                   'acti_func': 'relu'}
+
+# adapted from "mamba U-net"
+class UnetBlock(nn.Module):
+    """two convolution layers with batch norm and leaky relu"""
+
+    def __init__(self, c1, c2, dropout_p):
+        super().__init__()
+        self.conv_conv = nn.Sequential(
+            ConvNormAct(c1, c2, 3, 1, 1, nn.LeakyReLU(), nn.BatchNorm2d),
+            nn.Dropout(dropout_p),
+            ConvNormAct(c2, c2, 3, 1, 1, nn.LeakyReLU(), nn.BatchNorm2d),
+        )
+
+    def forward(self, x):
+        return self.conv_conv(x)
+
+
+# adapted from "mamba U-net"
+class UnetDown(nn.Module):
+    """Downsampling followed by ConvBlock"""
+
+    def __init__(self, c1, c2, dropout_p):
+        super().__init__()
+        self.maxpool_conv = nn.Sequential(nn.MaxPool2d(2), UnetBlock(c1, c2, dropout_p))
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+
+
+# adapted from "mamba U-net"
+class UnetUpBlock(nn.Module):
+    """ 2x up-sampling"""
+    def __init__(self, c1, c2, dropout_p):
+        super().__init__()
+        self.up = nn.ConvTranspose2d(c1, c2, kernel_size=2, stride=2)
+        self.conv = nn.Sequential(nn.Conv2d(c2 * 2, c2, 1),
+                                  UnetBlock(c2, c2, dropout_p))
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
+
+
+
