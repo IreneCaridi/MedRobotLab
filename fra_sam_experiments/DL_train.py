@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 from pathlib import Path
 
+import wandb
+
 from models.DL import DistillatioModels, check_load_model, SAM2handler
 from models.DL.common import Dummy, ConvNeXt, ConvNeXtSAM, ResNet1, ResNet2, ResNetTransform, ResNetTransform2, \
                              ResNetTransformerAtt, TransformerEncDec, ResUnet, ResUnetAtt, DarkNetCSP, ResUnetAtt2, \
@@ -16,7 +18,7 @@ from utils.DL.loaders import load_all
 from utils.DL.optimizers import get_optimizer, scheduler
 from utils.DL.collates import keep_unchanged
 from utils.DL.metrics import Metrics
-from utils.DL.logger import Loggers, LoggersBoth, log_confidence_score, save_predictions
+from utils.DL.logger import Loggers
 from utils import random_state, increment_path, json_from_parser
 
 # setting all random states
@@ -36,6 +38,7 @@ def main(args):
     p = Path(folder) / 'train'
     os.makedirs(p, exist_ok=True)
     save_path = increment_path(p, name)
+    name = save_path.stem
     epochs = args.epochs
     batch_size = args.batch_size
     device = args.device
@@ -103,7 +106,7 @@ def main(args):
     opt = get_optimizer(mod, args.opt, args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
 
     # initializing loggers
-    logger = Loggers(metrics=metrics, save_path=save_path, opt=opt, device=device, test=False)
+    logger = Loggers(metrics=metrics, save_path=save_path, opt=opt, test=False, wandb=bool(args.wandb))
 
     # lr scheduler
     sched = scheduler(opt, args.sched, args.lrf, epochs)
@@ -116,13 +119,23 @@ def main(args):
     # loading sam as teacher (SAM2_image_predictor instance -- SAM2(nn.module) is in teacher.model)
     teacher = SAM2handler(Path(parent_dir) / args.SAM2_weights, args.SAM2_configs, as_encoder=enc_flag)
 
-    # building model (ADJUST)
+
+    # building model
     model = DistillatioModels(student, teacher, loaders, loss_fn=loss_fn, device=device, AMP=args.AMP,
                               optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
                               as_encoder=enc_flag)
 
+    # initializing wandb
+    if args.wandb:
+        wandb.login(key="fb712bf124828e1fa61610a0ca30a295bd14f73d")
+        wandb.init(project='MedRobLab_prj', name=name, entity=args.wandb, config=args)
+
     # training the model
     model.train_loop(epochs)
+
+    # finisching wandb
+    if args.wandb:
+        wandb.finish()
 
 if __name__ == "__main__":
 
@@ -139,6 +152,9 @@ if __name__ == "__main__":
     # reshaping BOTH needed
     parser.add_argument('--reshape_mode', type=str, default='crop', choices=[None, 'crop', 'pad'], help=" how to handle resize")
     parser.add_argument('--reshape_size', type=int, default=512, help='the finel shape input to model')
+
+    # loggers option
+    parser.add_argument('--wandb', type=str, default='MedRobLab', help='name of wandb profile (if None means not logging)')
 
     parser.add_argument('--epochs', type=int, required=True, help='number of epochs')
     parser.add_argument('--batch_size', type=int, required=True, help='batch size')

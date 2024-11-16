@@ -4,6 +4,7 @@ from matplotlib import pyplot as plt
 import os
 import torch
 import torchmetrics
+import wandb
 
 from .callbacks import BaseCallback
 
@@ -13,11 +14,12 @@ class LogsHolder(BaseCallback):
         :param
             --metrics = metrics object
     """
-    def __init__(self, metrics, test=False):
+    def __init__(self, metrics, test=False, wandb=False):
         super().__init__()
         self.metrics = metrics
         self.dict = self.build_metrics_dict()
         self.test = test
+        self.wandb = wandb
 
     def build_metrics_dict(self):
         d = {key: [] for key in self.metrics.dict}
@@ -27,7 +29,6 @@ class LogsHolder(BaseCallback):
                 for i in range(self.metrics.num_classes):
                     d[key+f"_{i}"] = []
         return d
-
 
     def on_epoch_end(self, epoch=None):
         if not self.test:
@@ -49,6 +50,10 @@ class LogsHolder(BaseCallback):
                             self.dict[key+f"_{i}"].append(self.metrics.dict[key][i][0])
                         flat = [item[0] for item in self.metrics.dict[key]]
                         self.dict[key].append(np.float16(sum(flat)/len(flat)))  # mean value
+        if self.wandb:
+            dd = {k: self.dict[k][-1] for k in self.dict.keys()}
+            dd['epoch'] = epoch
+            wandb.log(dd)
 
 
 class SaveCSV(BaseCallback):
@@ -136,16 +141,19 @@ class SaveFigures(BaseCallback):
 
 
 class LrLogger(BaseCallback):
-    def __init__(self, opt, save_path):
+    def __init__(self, opt, save_path, wandb=False):
         super().__init__()
         self.opt = opt
         self.save_path = save_path
         self.log = []
         self.last_epoch = 0
+        self.wandb = wandb
 
     def on_epoch_end(self, epoch=None):
         self.log.append(self.opt.param_groups[0]["lr"])
         self.last_epoch = len(self.log)
+        if self.wandb:
+            wandb.log({'epoch': epoch, 'lr': self.log[-1]})
 
     def on_end(self):
         self.save()
@@ -355,55 +363,15 @@ class ConfusionMatrixLogger(BaseCallback):
 
 
 class Loggers(BaseCallback):
-    def __init__(self, metrics, opt, save_path, device, test):
+    def __init__(self, metrics, opt, save_path, test, wandb):
         super().__init__()
-        self.logs = LogsHolder(metrics, test=test)
+        self.logs = LogsHolder(metrics, test=test, wandb=wandb)
         self.csv = SaveCSV(self.logs, save_path, test=test)
-        self.lr = LrLogger(opt, save_path)
+        self.lr = LrLogger(opt, save_path, wandb=wandb)
         self.figure_saver = SaveFigures(self.logs, save_path)
         # self.ROC = ROClogger(save_path, num_classes=metrics.num_classes, device=device)
         # self.PRC = PRClogger(save_path, num_classes=metrics.num_classes, device=device)
         # self.cm = ConfusionMatrixLogger(save_path, metrics.num_classes, device)
-        self.build_list()
-
-    def on_epoch_end(self, epoch=None):
-        for obj in self.list:
-            obj.on_epoch_end(epoch)
-
-    def on_val_batch_end(self, output=None, target=None, batch=None):
-        for obj in self.list:
-            obj.on_val_batch_end(output, target, batch)
-
-    def on_val_end(self, metrics=None, epoch=None):
-        for obj in self.list:
-            obj.on_val_end(metrics, epoch)
-
-    def on_epoch_start(self, epoch=None, max_epoch=None):
-        for obj in self.list:
-            obj.on_epoch_start(epoch, max_epoch)
-
-    def on_end(self):
-        for obj in self.list:
-            obj.on_end()
-
-    def build_list(self):
-        setattr(self, "list", [value for _, value in vars(self).items()])
-
-
-class LoggersBoth(BaseCallback):
-    def __init__(self, metrics1, metrics2, opt, save_path, device):
-        super().__init__()
-        self.logs1 = LogsHolder(metrics1)
-        self.csv1 = SaveCSV(self.logs1, save_path, name='metrics_binary.csv')
-        self.lr1 = LrLogger(opt, save_path)
-        self.figure_saver1 = SaveFigures(self.logs1, save_path, name='metrics_binary.png')
-        self.ROC1 = ROClogger(save_path, num_classes=metrics1.num_classes, device=device, name='ROC_binary.png')
-        self.PRC1 = PRClogger(save_path, num_classes=metrics1.num_classes, device=device, name='PRC_binary.png')
-        self.cm1 = ConfusionMatrixLogger(save_path, metrics1.num_classes, device, name='confusion_matrix_binary.png')
-
-        self.logs2 = LogsHolder(metrics2)
-        self.csv2 = SaveCSV(self.logs2, save_path, name='metrics_all.csv')
-        self.figure_saver2 = SaveFigures(self.logs2, save_path, name='metrics_all.png')
         self.build_list()
 
     def on_epoch_end(self, epoch=None):

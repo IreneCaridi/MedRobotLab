@@ -659,7 +659,7 @@ class DistillatioModels(nn.Module):
             self.val_loop(epoch)
 
             # logging results
-            self.loggers.on_epoch_end()
+            self.loggers.on_epoch_end(epoch)
             # updating lr scheduler
             if self.sched:
                 self.sched.step()
