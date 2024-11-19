@@ -73,7 +73,7 @@ def main(args):
             student = UNetEncoderTrain()
             # loading model = bla bla bla
         elif args.student == 'RepViT':
-            student = RepViT('m1', args.reshape_size, )
+            student = RepViT('m1', args.reshape_size, fuse=False)  # fuse ONLY during inference
         else:
             raise TypeError("Model name not recognised")
     else:
@@ -127,7 +127,7 @@ def main(args):
 
     # initializing wandb
     if args.wandb:
-        wandb.login(key="fb712bf124828e1fa61610a0ca30a295bd14f73d")
+        wandb.login()  # key="fb712bf124828e1fa61610a0ca30a295bd14f73d"
         wandb.init(project='MedRobLab_prj', name=name, entity=args.wandb, config=args)
 
     # training the model
