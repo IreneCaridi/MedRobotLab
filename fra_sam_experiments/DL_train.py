@@ -1,25 +1,21 @@
 import argparse
 import os
 
-import torch
 import torch.nn as nn
 from pathlib import Path
 
 import wandb
 
-from models.DL import DistillatioModels, check_load_model, SAM2handler
-from models.DL.common import Dummy, ConvNeXt, ConvNeXtSAM, ResNet1, ResNet2, ResNetTransform, ResNetTransform2, \
-                             ResNetTransformerAtt, TransformerEncDec, ResUnet, ResUnetAtt, DarkNetCSP, ResUnetAtt2, \
-                             DarkNetCSPBoth, LearnableInitBiLSTM, LearnableInitBiLSTM2, MLPdo, MLPatt, MLPattDo, MLP, \
-                             UNetEncoderTrain, UNet
-from models.DL.Rep_ViT import RepViT
+from models import DistillatioModels, check_load_model, SAM2handler
+from models.common import Dummy, UNetEncoderTrain
+from models.Rep_ViT import RepViT
 from utils.DL.callbacks import Callbacks, EarlyStopping, Saver
 from utils.DL.loaders import load_all
 from utils.DL.optimizers import get_optimizer, scheduler
-from utils.DL.collates import keep_unchanged
+from utils.DL.losses import SemanticLosses
 from utils.DL.metrics import Metrics
 from utils.DL.logger import Loggers
-from utils import random_state, increment_path, json_from_parser
+from utils import random_state, increment_path, json_from_parser, my_logger
 
 # setting all random states
 random_state(36)
@@ -29,6 +25,12 @@ parent_dir = os.path.dirname(current_dir)
 
 
 def main(args):
+
+    #checking wandb
+    if args.wandb == 'None' or args.wandb == 'none' or args.wandb == 'False' or args.wandb == 'false':
+        wandb_name = None
+    else:
+        wandb_name = args.wandb
 
     # unpacking
     folder = args.folder
@@ -42,7 +44,7 @@ def main(args):
     epochs = args.epochs
     batch_size = args.batch_size
     device = args.device
-    out_classes = args.n_class + 1  # +1 for bkg
+    # out_classes = args.n_class + 1  # +1 for bkg
 
     if args.as_encoder:
         enc_flag = True
@@ -62,7 +64,7 @@ def main(args):
 
     # loading dataset already as iterable torch loaders (train, val ,(optional) test)
     loaders = load_all(data_paths, args.reshape_mode, args.reshape_size, batch_size, test_flag=False,
-                       use_label=not enc_flag)
+                       use_label=not enc_flag, n_workers=args.n_workers, pin_memory=args.pin_memory)
 
     # model (ADJUST)
     if "." not in args.student:
@@ -73,7 +75,7 @@ def main(args):
             student = UNetEncoderTrain()
             # loading model = bla bla bla
         elif args.student == 'RepViT':
-            student = RepViT('m1', args.reshape_size, fuse=False)  # fuse ONLY during inference
+            student = RepViT('m1', args.reshape_size, fuse=True)
         else:
             raise TypeError("Model name not recognised")
     else:
@@ -101,12 +103,12 @@ def main(args):
     if enc_flag:
         loss_fn = nn.MSELoss(reduction="mean")
     else:
-        raise AttributeError('loss for detector not yet implemented :)...')
+        loss_fn = SemanticLosses(alpha=1, gamma=2, lambdas=(0.5, 0.5), weight=None)  # maybe consider weights...
 
     opt = get_optimizer(mod, args.opt, args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
 
     # initializing loggers
-    logger = Loggers(metrics=metrics, save_path=save_path, opt=opt, test=False, wandb=bool(args.wandb))
+    logger = Loggers(metrics=metrics, save_path=save_path, opt=opt, test=False, wandb=bool(wandb_name))
 
     # lr scheduler
     sched = scheduler(opt, args.sched, args.lrf, epochs)
@@ -117,24 +119,24 @@ def main(args):
     # train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True, collate_fn=padding_x)  # to pad
 
     # loading sam as teacher (SAM2_image_predictor instance -- SAM2(nn.module) is in teacher.model)
-    teacher = SAM2handler(Path(parent_dir) / args.SAM2_weights, args.SAM2_configs, as_encoder=enc_flag)
-
+    teacher = SAM2handler(Path(parent_dir) / args.SAM2_weights, args.SAM2_configs, info_log=my_logger,
+                          as_encoder=enc_flag)
 
     # building model
-    model = DistillatioModels(student, teacher, loaders, loss_fn=loss_fn, device=device, AMP=args.AMP,
+    model = DistillatioModels(student, teacher, loaders, info_log=my_logger, loss_fn=loss_fn, device=device, AMP=args.AMP,
                               optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
                               as_encoder=enc_flag)
 
     # initializing wandb
-    if args.wandb:
-        wandb.login()  # key="fb712bf124828e1fa61610a0ca30a295bd14f73d"
-        wandb.init(project='MedRobLab_prj', name=name, entity=args.wandb, config=args)
+    if wandb_name:
+        wandb.login()
+        wandb.init(project='MedRobLab_prj', name=name, entity=wandb_name, config=args)
 
     # training the model
     model.train_loop(epochs)
 
     # finisching wandb
-    if args.wandb:
+    if wandb_name:
         wandb.finish()
 
 if __name__ == "__main__":
@@ -181,6 +183,10 @@ if __name__ == "__main__":
     group1 = parser.add_mutually_exclusive_group(required=True)
     group1.add_argument('--as_encoder', action="store_true", help='whether to do encoder KD')
     group1.add_argument('--as_predictor', action="store_true", help='whether to do masks KD')
+
+    # loaders params
+    parser.add_argument('--n_workers', type=int, default=7, help='number of workers for parallel dataloading ')
+    parser.add_argument('--pin_memory', type=bool, default=True, help='whether to pin memory for more efficient passage to gpu')
 
     args = parser.parse_args()
 

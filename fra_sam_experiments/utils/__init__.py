@@ -6,6 +6,39 @@ import torch
 from pathlib import Path
 import json
 
+import logging
+
+
+def init_logger():
+
+    logger = logging.getLogger("my_new_logger")
+
+    # Set the level
+    logger.setLevel(logging.INFO)
+
+    # Create a handler
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+
+    # Create a formatter and set it for the handler
+    formatter = logging.Formatter("")
+    handler.setFormatter(formatter)
+
+    # Add the handler to your logger
+    logger.addHandler(handler)
+
+    # Disable propagation to the root logger
+    logger.propagate = False
+
+    # if not logger.handlers:
+    #     logger.addHandler(handler)
+
+    return logger
+
+
+# GLOBAL CALL
+my_logger = init_logger()
+
 
 # fixes random states to same seed and silenced warnings
 def random_state(seed=36):
@@ -13,6 +46,7 @@ def random_state(seed=36):
     os.environ['PYTHONHASHSEED'] = str(seed)
     os.environ['MPLCONFIGDIR'] = os.getcwd() + '/configs/'
 
+    warnings.simplefilter(action='ignore', category=UserWarning)
     warnings.simplefilter(action='ignore', category=FutureWarning)
     warnings.simplefilter(action='ignore', category=Warning)
 

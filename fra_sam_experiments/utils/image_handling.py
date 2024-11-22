@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 from matplotlib.patches import Polygon
 import matplotlib.pyplot as plt
-
+import torch
 
 
 def int2color(integer, max_value=10):
@@ -190,3 +190,66 @@ def plot_mask_over_image(image, masks: list, ax):
 
             polygon = Polygon(m, closed=True, edgecolor='black', facecolor=int2color(c), alpha=0.4)
             ax.add_patch(polygon)
+
+
+def mask_list_to_array(mask_list, img_shape):
+    """
+        Convert the mask-polygons list of an image into a np.array with masks plotted
+
+    Args:
+        mask_list: List of tuples, where each tuple is (list of np.array polygons, class_id).
+                   Each polygon is a numpy array of shape (num_points, 2).
+        img_shape: tuple with shape of image
+
+    Returns:
+        mask: a np.array with integer masks of shape HxW (good for pytorch losses)
+    """
+
+    mask = np.zeros(img_shape, dtype=np.uint8)
+
+    for class_idx, (polygons, class_id) in enumerate(mask_list):
+        for polygon in polygons:
+
+            mask = cv2.fillPoly(mask, [polygon.astype(np.int32)], color=class_id)
+
+    return mask.sum(-1)
+
+
+def bbox_from_poly(masks_batch, return_dict=False):
+    """
+    Retrieves bounding boxes for each give polygonals.
+
+    args:
+        - masks_batch: list of masks polygons lists (masks polygons in same format as above [[(polys, id)...]...] )
+        - return_dict: if True it returns a list of dicts (1 per img) where each key is a class containing list of top_left
+                       and bottom_right corners of bboxes. Else it returns a list like [[(bbox, id)...]...] )
+                       where bbox is a tuple containing xyxy coord of bbox
+                       (NOTE it is different from polys, here 1 tuple x box)
+    Returns:
+        bboxes_list:
+    """
+
+    bboxes_list = []
+    for masks_instance in masks_batch:
+        bbox_dict = {}
+        for masks, class_id in masks_instance:
+            bboxes = []
+
+            for polygon in masks:
+
+                min_x, min_y = np.min(polygon, axis=0)
+                max_x, max_y = np.max(polygon, axis=0)
+
+                bboxes.append((min_x, min_y, max_x, max_y))
+                bbox_dict[class_id] = bboxes
+
+        # sorting classes for consistency
+        if return_dict:
+            bboxes_list.append({k: bbox_dict[k] for k in sorted(bbox_dict.keys())})
+        else:
+            bb = []
+            for k in sorted(bbox_dict.keys()):
+                bb += [(x, k) for x in bbox_dict[k]]
+            bboxes_list.append(bb)
+    return bboxes_list
+

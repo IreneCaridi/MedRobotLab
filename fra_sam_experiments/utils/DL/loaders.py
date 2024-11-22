@@ -4,16 +4,15 @@ from pathlib import Path
 import torch
 import numpy as np
 from PIL import Image
-from sklearn.model_selection import train_test_split
+# from sklearn.model_selection import train_test_split
 from collections import defaultdict
 
 from ..CholectinstanceSeg_utils import get_mask_from_json
 from ..mmi_dataset_utils import get_mask_from_txt
 
-from ..image_handling import center_crop_and_resize, pad_and_resize
-from .. import random_state
-
-random_state()
+from ..image_handling import center_crop_and_resize, pad_and_resize, mask_list_to_array
+from .. import my_logger
+from .collates import imgs_masks_polys
 
 
 class DummyLoader(torch.utils.data.Dataset):
@@ -45,7 +44,7 @@ class DummyLoader(torch.utils.data.Dataset):
     def load_imgs(self):
         imgs = []
 
-        print(f'loading images form {self.img_path}...')
+        my_logger.info(f'loading images form {self.img_path}...')
 
         for img in sorted(os.listdir(self.img_path)):
 
@@ -59,7 +58,18 @@ class DummyLoader(torch.utils.data.Dataset):
 
 
 class LoaderFromPath:
-    def __init__(self, data_path, reshape_mode=None, reshaped_size=640, test_flag=False, use_label=False):
+    def __init__(self, data_path, reshape_mode=None, reshaped_size=640, test_flag=False, use_label=False, store_imgs=False):
+        """
+        gets the data path and loads images or path-to-images split datasets
+
+        args:
+            - data_path: path to dataset
+            - reshape_mode: how to get square imgs
+            - reshaped_size: target size as input to model
+            - test_flag: whether to return the test set (it always split for it, simply it is not returned)
+            - use_label: whether to load also labels
+            - load_imgs: if True it directly loads images to RAM, else it stores paths-to-images
+        """
         accepted_reshape_types = [None, 'crop', 'pad']
         assert reshape_mode in accepted_reshape_types, f'{reshape_mode} not valid, chose from {accepted_reshape_types}'
         self.reshape_mode = reshape_mode
@@ -68,7 +78,12 @@ class LoaderFromPath:
         self.img_path = Path(data_path) / 'images'
         self.lab_path = Path(data_path) / 'labels'
 
-        self.use_label = use_label
+        if use_label:
+            self.lab_suffix = self.get_lab_type()
+        else:
+            self.lab_suffix = None
+
+        self.store_imgs = store_imgs
 
         self.test_flag = test_flag
         self.train, self.val, self.test = self.load_imgs()
@@ -81,35 +96,46 @@ class LoaderFromPath:
         for folder in os.listdir(self.img_path):
             # train, valid or test
 
-            print(f'loading images from {self.img_path / folder}...')
-            for img in sorted(os.listdir(self.img_path / folder)):
-
-                img = np.array(Image.open(self.img_path / folder / img).convert('RGB'))
-                if self.use_label:
-                    lab = self.load_masks_labels(img)
-                    imgs[folder].append((self.reshape_and_scale(img), lab))
-                else:
-                    imgs[folder].append(self.reshape_and_scale(img))
-            print(f'loaded {len(imgs[folder])} images for {folder}')
+            my_logger.info(f'loading images from {self.img_path / folder}...')
+            for img_n in sorted(os.listdir(self.img_path / folder)):
+                if self.store_imgs:  # loads all dataset to ram
+                    img = np.array(Image.open(self.img_path / folder / img_n).convert('RGB'))
+                    if self.lab_suffix:
+                        lab, poly = self.load_masks_labels(folder, Path(img_n).with_suffix(self.lab_suffix), img.shape)
+                        imgs[folder].append((self.reshape_and_scale(img), (lab, poly)))
+                    else:
+                        imgs[folder].append(self.reshape_and_scale(img))
+                else:  # folders to only load batches
+                    if self.lab_suffix:
+                        lab_path = self.lab_path / folder / Path(img_n).with_suffix(self.lab_suffix)
+                        imgs[folder].append((self.img_path / folder / img_n, lab_path))
+                    else:
+                        imgs[folder].append(self.img_path / folder / img_n)
+            my_logger.info(f'loaded {len(imgs[folder])} images for {folder}')
         if self.test_flag:
             return imgs['train'], imgs['valid'], imgs['test']
         else:
             return imgs['train'], imgs['valid'], []
 
-    def load_masks_labels(self, img):
-        # masks are a list containing N classes tuples like (list of masks, class)
-        #   --> [([mask_0 ... mask_n], class_id) ... xN_clsses]
+    def get_lab_type(self, folder='train'):  # every folder of a dataset should be same format...
+        i = os.listdir(self.lab_path / folder)
+        return Path(i[0]).suffix
 
-        if '.json' in img:
-            masks = get_mask_from_json(self.lab_path / Path(img).with_suffix('.json'))
-            # elaborate
-            return masks
-        elif '.txt' in img:
-            masks = get_mask_from_txt(self.lab_path / Path(img).with_suffix('.txt'), return_dict=False)
-            # elaborare
-            return masks
+    def load_masks_labels(self, folder, lab_name, img_shape):
+        # masks are a np.array with integer coded masks (fine for torch)
+
+        if '.json' in lab_name:
+            poly = get_mask_from_json(self.lab_path / folder / lab_name)
+            mask = mask_list_to_array(poly, img_shape)
+            mask = self.reshape_and_scale(mask)
+            return mask, poly
+        elif '.txt' in lab_name:
+            poly = get_mask_from_txt(self.lab_path / folder / lab_name, return_dict=False)
+            mask = mask_list_to_array(poly, img_shape)
+            mask = self.reshape_and_scale(mask)
+            return mask, poly
         else:
-            raise ValueError(f'loading from {self.lab_path} not yet implemented...')
+            raise TypeError(f'{self.lab_suffix} labels are not accepted... ')
 
     def reshape_and_scale(self, img):
         if self.reshape_mode == 'pad':
@@ -120,46 +146,112 @@ class LoaderFromPath:
             return img / 255
 
 
-
-
 class LoaderFromData(torch.utils.data.Dataset):
-    def __init__(self, data, augmentation=None):
+    def __init__(self, data, augmentation=None, reshape_mode=None, reshaped_size=640):
         """
             gets the data loaded by the LoadersFromPaths and creates an iterable torch-like dataloader
 
             args:
-                - data list of images as np.array or tuple (img, lab)
+                - data: list of images as np.array or tuple (img, lab)
                 - augmentation: probably I'll create an apposite object
+                - reshape_mode: how to get square imgs
+                - reshaped_size: target size as input to model
         """
         super().__init__()
 
+        accepted_reshape_types = [None, 'crop', 'pad']
+        assert reshape_mode in accepted_reshape_types, f'{reshape_mode} not valid, chose from {accepted_reshape_types}'
+        self.reshape_mode = reshape_mode
+        self.reshape_size = reshaped_size
+
         self.data = data
+
+        # check for labels
+        if isinstance(self.data[0], tuple):
+            i, _ = self.data[0]
+            self.with_labels = True
+        else:
+            i = self.data[0]
+            self.with_labels = False
+
+        # check for loaded or not
+        if isinstance(i, np.ndarray):
+            self.already_loaded = True  # I have loaded images and labels
+        else:
+            self.already_loaded = False  # I have paths
+
+
         self.augmentation = augmentation
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        if isinstance(self.data[idx], tuple):
-            raise ValueError('data as tuple means labels are given and that is not yet implemented...')
+        if self.with_labels:
+            if self.already_loaded:
+                x, (y, p) = self.data[idx]  # imgs, labs, polys
+            else:
+                x_p, y_p = self.data[idx]
+                x = self.reshape_and_scale(np.array(Image.open(x_p).convert('RGB')))
+                y, p = self.load_masks_labels(y_p, x.shape)
+            return self.transform(x, [y, p])
         else:
-            data = self.data[idx]
-            if self.augmentation:
-                raise AttributeError('augmentetion not yet implemented :)....')
-            data = torch.from_numpy(data.astype('float32')).permute(2, 0, 1)  # to CxHxW
+            if self.already_loaded:  # check if paths or images are given
+                x = self.data[idx]
+            else:
+                x = self.reshape_and_scale(np.array(Image.open(self.data[idx]).convert('RGB')))
+            return self.transform(x)
 
-        return data
+    def transform(self, x, y=None):
+        if self.augmentation:
+            pass
+            # do something for augmentation...
+        else:
+            x = torch.from_numpy(x.astype('float32')).permute(2, 0, 1)
 
-    def transform(self):
-        pass
-        # here should make augmentation
+            return (x, torch.LongTensor(y[0]), y[1]) if y else x
+
+    def reshape_and_scale(self, img):
+        if self.reshape_mode == 'pad':
+            return pad_and_resize(img / 255, self.reshape_size)
+        elif self.reshape_mode == 'crop':
+            return center_crop_and_resize(img / 255, self.reshape_size)
+        else:
+            return img / 255
+
+    def load_masks_labels(self, lab_path, img_shape):
+        # masks are a np.array with integer coded masks (fine for torch)
+
+        if '.json' in lab_path:
+            poly = get_mask_from_json(lab_path)
+            mask = mask_list_to_array(poly, img_shape)
+            mask = self.reshape_and_scale(mask)
+            return mask, poly
+        elif '.txt' in lab_path:
+            poly = get_mask_from_txt(lab_path, return_dict=False)
+            mask = mask_list_to_array(poly, img_shape)
+            mask = self.reshape_and_scale(mask)
+            return mask, poly
+        else:
+            raise TypeError(f'{self.lab_suffix} labels are not accepted... ')
 
 
-def load_all(img_paths, reshape_mode=None, reshaped_size=640, batch_size=4, test_flag=False, use_label=False):
+def load_all(img_paths: list, reshape_mode=None, reshaped_size=1024, batch_size=4, test_flag=False, use_label=False,
+             n_workers=7, pin_memory=True):
     """
+        loads all data in img_paths and returns the dataloaders for train, val and eventually test
 
-        should load all data in img_paths and returns the dataloaders for train, val and eventually test
-
+        args:
+            - img_paths: list of paths from which data are loaded
+            - reshape_mode: how to extract square imgs
+            - reshaped_size: target shape to be fed to model
+            - batch_size: self explained
+            - test_flag: whether to return test set
+            - use_label: whether to use labels
+            - n_workers: number of workers for parallel dataloading (rule of thumb: n° cpu core - 1)
+            - pin_memory: whether to pin memory for more efficient passage to gpu
+        returns:
+            - train_loader, val_loader, (optional) test_loader : torch iterable dataloaders
     """
 
     accepted_reshape_types = [None, 'crop', 'pad']
@@ -176,10 +268,21 @@ def load_all(img_paths, reshape_mode=None, reshaped_size=640, batch_size=4, test
         val += loader.val
         test += loader.test
 
-    train_loader = torch.utils.data.DataLoader(LoaderFromData(train), batch_size=batch_size, shuffle=True)
-    val_loader = torch.utils.data.DataLoader(LoaderFromData(val), batch_size=batch_size, shuffle=True)
+    if use_label:
+        collate_fun = imgs_masks_polys
+    else:
+        collate_fun = None
+
+    train_loader = torch.utils.data.DataLoader(LoaderFromData(train, reshape_mode=reshape_mode, reshaped_size=reshaped_size),
+                                               batch_size=batch_size, shuffle=True, pin_memory=pin_memory,
+                                               num_workers=n_workers, collate_fun=collate_fun)
+    val_loader = torch.utils.data.DataLoader(LoaderFromData(val, reshape_mode=reshape_mode, reshaped_size=reshaped_size),
+                                             batch_size=batch_size, shuffle=True, pin_memory=pin_memory,
+                                             num_workers=n_workers, collate_fun=collate_fun)
     if test_flag:
-        test_loader = torch.utils.data.DataLoader(LoaderFromData(test), batch_size=batch_size, shuffle=False)
+        test_loader = torch.utils.data.DataLoader(LoaderFromData(test, reshape_mode=reshape_mode, reshaped_size=reshaped_size),
+                                                  batch_size=batch_size, shuffle=False, pin_memory=pin_memory,
+                                                  num_workers=n_workers, collate_fun=collate_fun)
         return train_loader, val_loader, test_loader
     else:
         return train_loader, val_loader
