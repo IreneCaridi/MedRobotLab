@@ -58,7 +58,7 @@ elif device.type == "mps":
 sam2_checkpoint = r"C:\Users\User\Desktop\uni_matteo\quinto_anno\laboratorio_robotics\project\MedRobotLab\sam2\checkpoints\sam2.1_hiera_large.pt"
 model_cfg = r"C:\Users\User\Desktop\uni_matteo\quinto_anno\laboratorio_robotics\project\MedRobotLab\sam2\sam2\configs\sam2.1\sam2.1_hiera_l.yaml"
 
-predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device=device)
+predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint)
 
 # `video_dir`
 video_dir = r"C:\Users\User\Desktop\datasets\mmi\dataset_video\dataset_video\images\train"
