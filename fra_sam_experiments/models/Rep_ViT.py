@@ -386,7 +386,7 @@ class RepViT(nn.Module):
         'm3': m3_cfgs
     }
 
-    def __init__(self, arch, img_size=1024, fuse=True, freeze=False,
+    def __init__(self, arch, img_size=1024, fuse=False, freeze=False,
                  load_from=None, use_rpn=False, out_indices=None, upsample_mode='bicubic'):
         super(RepViT, self).__init__()
         # setting of inverted residual blocks

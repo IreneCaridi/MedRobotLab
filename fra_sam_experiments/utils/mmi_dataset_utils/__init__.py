@@ -31,7 +31,7 @@ def get_mask_from_txt(file_path, img_shape: tuple = (1080, 1920), return_dict=Fa
             # Append polygon to the respective class list in the dictionary
             mask_dict[class_label].append(coordinates)
 
-    mask_list = [(mask_dict[k], k) for k in mask_dict.keys()]
+    mask_list = [(mask_dict[k], k + 1) for k in mask_dict.keys()]  # N.B. k+1 is done as classes are 0-2 but 0 is bkg
 
     if return_dict:
         return mask_dict

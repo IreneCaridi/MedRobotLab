@@ -1,7 +1,7 @@
 import torch
-import torchvision
+
 import torch.nn as nn
-import torchvision.transforms as transforms
+# import torchvision.transforms as transforms
 
 from .models_blocks import CNeXtBlock, CNeXtStem, CNeXtDownSample, ResBlock, ConvNormAct, ResBlockDP, TransformerBlock, \
                            SPPF, C3, UnetBlock, UnetDown, UnetUpBlock
@@ -1039,7 +1039,7 @@ class UnetEncoder(nn.Module):
         x1 = self.down1(x0)   # ->  256x256x64
         x2 = self.down2(x1)   # ->  128x128x128
         x3 = self.down3(x2)   # ->  64x64x256
-        x4 = self.down4(x3)   # ->  64x64x512
+        x4 = self.down4(x3)   # ->  32x32x512
         return x0, x1, x2, x3, x4
 
 
