@@ -90,7 +90,7 @@ def main():
     try:
         predict_and_plot(predictor, imgs, pts_batch, lbs_batch, img_name=img_name)
     except ValueError:
-        raise('Probably you selected different n° of points per class. '
+        raise ValueError('Probably you selected different n° of points per class. '
               '\n You can select only equal n° of points per class, excluding badckground, per image. '
               '\n (That means that different images can have different n° of points per class)')
 

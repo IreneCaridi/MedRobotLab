@@ -23,11 +23,11 @@ pyparsing==3.2.0
 python-dateutil==2.9.0.post0
 pywin32==308
 PyYAML==6.0.2
--e git+https://github.com/facebookresearch/sam2.git@c2ec8e14a185632b0a5d8b161928ceb50197eddc#egg=SAM_2
+
 six==1.16.0
 sympy==1.13.1
-torch==2.5.0+cu118
-torchvision==0.20.0+cu118
+torch==2.5.0
+torchvision==0.20.0
 tqdm==4.66.5
 typing_extensions==4.9.0
 pandas==2.2.2
