@@ -83,7 +83,6 @@ class Precision(BaseMetric):
                                                             top_k=top_k, average=None).to(self.device)
 
 
-
 class Recall(BaseMetric):
     """
     :param
@@ -114,7 +113,7 @@ class AUC(BaseMetric):
 
 
 class Metrics(BaseCallback):
-    def __init__(self, num_classes=2, device="cpu", top_k=1, thresh=0.5):
+    def __init__(self, loss_fn, num_classes=2, device="cpu", top_k=1, thresh=0.5):
         """
 
             wrapper for metrics to be used in the model
@@ -126,6 +125,7 @@ class Metrics(BaseCallback):
         # self.R = Recall(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
         # self.AuC = AUC(num_classes=num_classes, device=device, thresh=None)
         # self.metrics = [self.A, self.P, self.R, self.AuC]
+        self.loss_fn = loss_fn
         self.metrics = []
         self.dict = self.build_metrics_dict()
         self.num_classes = num_classes
@@ -134,21 +134,33 @@ class Metrics(BaseCallback):
         for obj in self.metrics:
             obj.on_train_batch_end(output, target, batch)
 
-    def on_train_end(self, metrics=None):
-        self.dict["train_loss"] = [np.float16(metrics)]
+    def on_train_end(self, num_batches=None):
+        for k in self.loss_fn.running_dict.keys():
+            if k == 'dice':
+                self.dict["train_" + k] = [self.loss_fn.running_dict[k][i] / num_batches
+                                           for i in self.loss_fn.running_dict[k].shape[0]]
+            else:
+                self.dict["train_" + k] = [self.loss_fn.running_dict[k] / num_batches]  # all scalars
+
         for obj in self.metrics:
             name = "train_" + obj.__class__.__name__
-            self.dict[name] = [[x] for x in obj.t_value.to("cpu").numpy().astype(np.float16)]
+            self.dict[name] = [x for x in obj.t_value.to("cpu").numpy().astype(np.float16)]
 
     def on_val_start(self):
         for obj in self.metrics:
             obj.on_val_start()
 
-    def on_val_end(self, metrics=None, epoch=None):
-        self.dict["val_loss"] = [np.float16(metrics)]
+    def on_val_end(self, num_batches=None, epoch=None):
+        for k in self.loss_fn.running_dict.keys():
+            if k == 'dice':
+                self.dict["val_" + k] = [self.loss_fn.running_dict[k][i] / num_batches
+                                         for i in self.loss_fn.running_dict[k].shape[0]]
+            else:
+                self.dict["val_" + k] = [self.loss_fn.running_dict[k] / num_batches]  # all scalars
+
         for obj in self.metrics:
             name = "val_" + obj.__class__.__name__
-            self.dict[name] = [[x] for x in obj.v_value.to("cpu").numpy().astype(np.float16)]
+            self.dict[name] = [x for x in obj.v_value.to("cpu").numpy().astype(np.float16)]
 
     def on_val_batch_end(self, output=None, target=None, batch=None):
         for obj in self.metrics:
@@ -161,9 +173,8 @@ class Metrics(BaseCallback):
     def build_metrics_dict(self):
 
         names = [obj.__class__.__name__ for obj in self.metrics]
-        names.append("loss")
-        keys = ["train_"+name for name in names]
-        keys.extend(["val_"+name for name in names])
+        names += [k for k in self.loss_fn.running_dict.keys()]
+        keys = ["train_"+name for name in names] + ["val_"+name for name in names]
 
         return {key: None for key in keys}
 

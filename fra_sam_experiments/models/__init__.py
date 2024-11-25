@@ -8,8 +8,6 @@ import os
 import sys
 import logging
 
-from ..utils.image_handling import bbox_from_poly
-
 # SETTING GLOBAL VARIABLES
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'
 
@@ -41,7 +39,7 @@ def check_load_model(model, backbone_weights):
 
 class ModelClass(nn.Module):
     def __init__(self, model, loaders, device='cpu', callbacks=None, loss_fn=None, optimizer=None, sched=None,
-                 metrics=None, loggers=None, AMP=True, freeze=None, sequences=False, bi_head=False, info_log=None):
+                 metrics=None, loggers=None, AMP=True, freeze=None, info_log=None):
         super().__init__()
         """
         :param
@@ -56,8 +54,6 @@ class ModelClass(nn.Module):
         """
 
         self.freeze = freeze
-        self.seq = sequences
-        self.bi_head = bi_head
 
         assert isinstance(info_log, logging.Logger), 'provided info_log is not a logger'
         self.my_logger = info_log
@@ -67,7 +63,7 @@ class ModelClass(nn.Module):
         else:
             raise TypeError("model not recognised")
 
-        self.train_loader, self.val_loader, self.test_loader = loaders
+        self.train_loader, self.val_loader = loaders
         if device == 'gpu':
             if torch.cuda.is_available():
                 self.device = 'cuda:0'
@@ -81,19 +77,14 @@ class ModelClass(nn.Module):
             self.device = 'cpu'
             self.gpu_mem = 0
 
-        self.values_to_find = torch.tensor([0, 1, 2])
-
         self.my_logger.info(f"loading model to device={self.device}")
         self.model.to(self.device)
 
         self.callbacks = callbacks
 
-        if self.bi_head:
-            self.metrics = metrics[1]  # so I plot all head to pbar
-            self.metrics1 = metrics[0]  # binary head
-        else:
-            self.metrics = metrics
-            self.metrics1 = None
+        self.metrics = metrics
+        self.metrics1 = None
+
         self.loggers = loggers
 
         if loss_fn:
@@ -108,10 +99,8 @@ class ModelClass(nn.Module):
         else:
             self.AMP = False
 
-
-    def train_one_epoch(self,epoch_index,tot_epochs):
-        running_loss = 0.
-        last_loss = 0.
+    def train_one_epoch(self, epoch_index, tot_epochs):
+        self.loss_fun.reset()
 
         # initializing progress bar
         description = 'Training'
@@ -123,85 +112,67 @@ class ModelClass(nn.Module):
             torch.cuda.empty_cache()  # Clear GPU memory
             gpu_used = torch.cuda.max_memory_allocated() / (1024 ** 3)
 
-            if self.seq:
-                inputs, labs = data
-                inputs, labs = self.get_seq_input(inputs, labs)
-            else:
-                inputs, labs = data
-                inputs = inputs.to(self.device)
-                labs = labs.to(self.device)
+            inputs, labs, _ = data   # 3rd unpacked value are polys (I don't wont to change the collate and loaders...)
+            inputs = inputs.to(self.device)
+            labs = labs.to(self.device)
 
             self.opt.zero_grad()
 
             if self.AMP:
                 with autocast():
                     outputs = self.model(inputs)
-                    if self.bi_head:
-                        loss, outputs, labs = self.handle_both(outputs, labs)
-                    else:
-                        loss = self.loss_fun(outputs, labs)
+
+                    loss = self.loss_fun(outputs, labs)
 
                     self.scaler.scale(loss).backward()
                     self.scaler.step(self.opt)
                     self.scaler.update()
             else:
                 outputs = self.model(inputs)
-                if self.bi_head:
-                    loss, outputs, labs = self.handle_both(outputs, labs)
-                else:
-                    loss = self.loss_fun(outputs, labs)
+
+                loss = self.loss_fun(outputs, labs)
                 loss.backward()
                 self.opt.step()
 
             del inputs
 
-            running_loss += loss.item()
-            last_loss = running_loss #/ self.train_loader.batch_size  # loss per batch
-            running_loss = 0.
+            current_loss = self.loss_fun.get_current_value(batch)
 
             with torch.no_grad():
                 # computing training metrics
-                if self.bi_head:
-                    if outputs[1] is not None:
-                        self.metrics.on_train_batch_end(outputs[1].float(), labs[1], batch)
-                        # calling callbacks
-                        self.callbacks.on_train_batch_end(outputs[1].float(), labs[1], batch)
-                    self.metrics1.on_train_batch_end(outputs[0].float(), labs[0], batch)
-                else:
-                    self.metrics.on_train_batch_end(outputs.float(), labs, batch)
-                    # calling callbacks
-                    self.callbacks.on_train_batch_end(outputs.float(), labs, batch)
+                self.metrics.on_train_batch_end(outputs.float(), labs, batch)
+                # calling callbacks
+                self.callbacks.on_train_batch_end(outputs.float(), labs, batch)
 
             # updating pbar
-            if self.metrics.num_classes != 2:
-                A = self.metrics.A.t_value_mean
-                P = self.metrics.P.t_value_mean
-                R = self.metrics.R.t_value_mean
-                AUC = self.metrics.AuC.t_value_mean
-            else:
-                A = self.metrics.A.t_value_mean
-                P = self.metrics.P.t_value[1]
-                R = self.metrics.R.t_value[1]
-                AUC = self.metrics.AuC.t_value[1]
+            # if self.metrics.num_classes != 2:
+            #     A = self.metrics.A.t_value_mean
+            #     P = self.metrics.P.t_value_mean
+            #     R = self.metrics.R.t_value_mean
+            #     AUC = self.metrics.AuC.t_value_mean
+            # else:
+            #     A = self.metrics.A.t_value_mean
+            #     P = self.metrics.P.t_value[1]
+            #     R = self.metrics.R.t_value[1]
+            #     AUC = self.metrics.AuC.t_value[1]
 
-            pbar_loader.set_description(f'Epoch {epoch_index}/{tot_epochs-1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
-                                        f'train_loss: {last_loss:.4f}, A: {A :.2f}, P: {P :.2f}, R: {R :.2f}, AUC: {AUC :.2f}')
+            # pbar_loader.set_description(f'Epoch {epoch_index}/{tot_epochs-1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
+            #                             f'train_loss: {last_loss:.4f}, A: {A :.2f}, P: {P :.2f}, R: {R :.2f}, AUC: {AUC :.2f}')
+
+            pbar_loader.set_description(f'Epoch {epoch_index}/{tot_epochs - 1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
+                                        f'train_loss: {current_loss:.4f}')
             if self.device != "cpu":
                 torch.cuda.synchronize()
 
         # updating dictionary
-        self.metrics.on_train_end(last_loss)
-        if self.bi_head:
-            self.metrics1.on_train_end(last_loss)
+        self.metrics.on_train_end(batch + 1)
 
     def val_loop(self, epoch):
-        running_loss = 0.0
-        last_loss = 0.0
+        self.loss_fun.reset()
 
-        #resetting metrics for validation
+        # resetting metrics for validation
         self.metrics.on_val_start()
-        if self.bi_head:
-            self.metrics1.on_val_start()
+
         # calling callbacks
         self.callbacks.on_val_start()
 
@@ -216,62 +187,46 @@ class ModelClass(nn.Module):
             for batch, data in pbar_loader:
                 torch.cuda.empty_cache()  # Clear GPU memory
 
-                if self.seq:
-                    inputs, labels = data
-                    inputs, labels = self.get_seq_input(inputs, labels)
-                else:
-                    inputs, labels = data
-                    inputs = inputs.to(self.device)
-                    labels = labels.to(self.device)
+                inputs, labels, _ = data  # _ == polys...
+                inputs = inputs.to(self.device)
+                labels = labels.to(self.device)
 
                 outputs = self.model(inputs)
-                if self.bi_head:
-                    loss, outputs, labels = self.handle_both(outputs, labels)
-                else:
-                    loss = self.loss_fun(outputs, labels)
 
-                running_loss += loss.item()
-                last_loss = running_loss #/ self.val_loader.batch_size  # loss per batch
-                running_loss = 0.0
+                _ = self.loss_fun(outputs, labels)
+
+                current_loss = self.loss_fun.get_current_value(batch)
 
                 if self.device != "cpu":
                     torch.cuda.synchronize()
 
                 # computing metrics on batch
-                if self.bi_head:
-                    if outputs[1] is not None:
-                        self.metrics.on_val_batch_end(outputs[1].float(), labels[1], batch)
-                        # calling callbacks
-                        self.callbacks.on_val_batch_end(outputs[1].float(), labels[1], batch)
-                    self.metrics1.on_val_batch_end(outputs[0].float(), labels[0], batch)
-                    self.loggers.on_val_batch_end(outputs[0], labels[0], batch)
-                else:
-                    self.metrics.on_val_batch_end(outputs.float(), labels, batch)
-                    # calling callbacks
-                    self.callbacks.on_val_batch_end(outputs, labels, batch)
-                    # updating roc and prc
-                    self.loggers.on_val_batch_end(outputs, labels, batch)
+                self.metrics.on_val_batch_end(outputs.float(), labels, batch)
+                # calling callbacks
+                self.callbacks.on_val_batch_end(outputs, labels, batch)
+                # updating roc and prc
+                self.loggers.on_val_batch_end(outputs, labels, batch)
 
-                # updating pbar
-                if self.metrics.num_classes != 2:
-                    A = self.metrics.A.v_value_mean
-                    P = self.metrics.P.v_value_mean
-                    R = self.metrics.R.v_value_mean
-                    AUC = self.metrics.AuC.v_value_mean
-                else:
-                    A = self.metrics.A.v_value_mean
-                    P = self.metrics.P.v_value[1]
-                    R = self.metrics.R.v_value[1]
-                    AUC = self.metrics.AuC.v_value[1]
-                description = f'Validation: val_loss: {last_loss:.4f}, val_A: {A :.2f}, ' \
-                              f'val_P: {P :.2f}, val_R: {R :.2f}, val_AUC: {AUC :.2f}'
+                # # updating pbar
+                # if self.metrics.num_classes != 2:
+                #     A = self.metrics.A.v_value_mean
+                #     P = self.metrics.P.v_value_mean
+                #     R = self.metrics.R.v_value_mean
+                #     AUC = self.metrics.AuC.v_value_mean
+                # else:
+                #     A = self.metrics.A.v_value_mean
+                #     P = self.metrics.P.v_value[1]
+                #     R = self.metrics.R.v_value[1]
+                #     AUC = self.metrics.AuC.v_value[1]
+                # description = f'Validation: val_loss: {last_loss:.4f}, val_A: {A :.2f}, ' \
+                #               f'val_P: {P :.2f}, val_R: {R :.2f}, val_AUC: {AUC :.2f}'
+                description = f'Validation: val_loss: {current_loss:.4f}'
                 pbar_loader.set_description(description)
 
         if outputs is not None:
             # updating metrics dict
-            self.metrics.on_val_end(last_loss)
-            if self.bi_head:
-                self.metrics1.on_val_end(last_loss)
+            self.metrics.on_val_end(batch + 1)
+
             # updating loggers (roc, prc)
             self.loggers.on_val_end()
             # calling callbacks
@@ -284,8 +239,7 @@ class ModelClass(nn.Module):
             torch.cuda.empty_cache()
 
             self.metrics.on_epoch_start()
-            if self.bi_head:
-                self.metrics1.on_epoch_start()
+
             self.loggers.on_epoch_start(epoch=epoch, max_epoch=num_epochs)
 
             # self.model.train(True)
@@ -294,25 +248,20 @@ class ModelClass(nn.Module):
             # for name, param in self.model.named_parameters():
             #     self.my_logger.info(name, param.requires_grad)
 
-            # reshuffle for subsampling
-            self.train_loader.dataset.build()
             # 1 epoch train
             self.train_one_epoch(epoch, num_epochs)
 
-            # reshuffle for subsampling
-            self.val_loader.dataset.build()
             # validation
             self.val_loop(epoch)
 
             # logging results
-            self.loggers.on_epoch_end()
+            self.loggers.on_epoch_end(epoch)
             # updating lr scheduler
             if self.sched:
                 self.sched.step()
             #resetting metrics
             self.metrics.on_epoch_end()
-            if self.bi_head:
-                self.metrics1.on_epoch_end()
+
             # calling callbacks
             try:
                 self.callbacks.on_epoch_end(epoch)
@@ -327,72 +276,6 @@ class ModelClass(nn.Module):
         # calling callbacks (saving last model)
         self.callbacks.on_end()
 
-    def inference(self, return_preds=False):
-        self.model.train(False)
-        outputs = []
-
-        model = nn.Sequential(self.model,
-                              nn.Softmax(1))
-
-        # self.loggers.on_epoch_start(0, 1)
-
-        # resetting metrics for validation
-        # self.metrics.on_val_start()
-
-        # initilialize progress bar
-        description = f'Test'
-
-        pbar_loader = tqdm(enumerate(self.test_loader), total=len(self.test_loader), desc=description, unit='batch',
-                           bar_format=TQDM_BAR_FORMAT)
-        with torch.no_grad():
-            for batch, data in pbar_loader:
-
-                if self.seq:
-                    inputs, labels = data
-                    inputs, labels = self.get_seq_input(inputs, labels)
-                else:
-                    inputs, labels = data
-                    inputs = inputs.to(self.device)
-                    #labels = labels.to(self.device)
-
-                output = model(inputs)
-                pred = output.to('cpu')
-                outputs.append(pred)
-
-                if self.device != "cpu":
-                    torch.cuda.synchronize()
-
-                # computing metrics on batch
-                # self.metrics.on_val_batch_end(output, labels, batch)
-                # self.loggers.on_val_batch_end(output, labels, batch)
-
-                # updating pbar
-                # if self.metrics.num_classes != 2:
-                #     A = self.metrics.A.v_value_mean
-                #     P = self.metrics.P.v_value_mean
-                #     R = self.metrics.R.v_value_mean
-                #     AUC = self.metrics.AuC.v_value_mean
-                # else:
-                #     A = self.metrics.A.v_value_mean
-                #     P = self.metrics.P.v_value[1]
-                #     R = self.metrics.R.v_value[1]
-                #     AUC = self.metrics.AuC.v_value[1]
-                # description = f'item: {batch}/{len(self.test_loader)-1}, A: {A :.2f}, ' \
-                #               f'P: {P :.2f}, R: {R :.2f}, AUC: {AUC :.2f}'
-                # pbar_loader.set_description(description)
-
-        # self.my_logger.info TEST RESULTS
-        # resetting metrics
-        # self.metrics.on_val_end(0)
-        # self.loggers.on_val_end()
-        # self.loggers.on_epoch_end()
-        # self.metrics.on_epoch_end()
-        #
-        # self.loggers.on_end()
-
-        if return_preds:
-            return outputs
-
     def check_freeze(self):
         if self.freeze:
             for name, param in self.model.named_parameters():
@@ -402,32 +285,6 @@ class ModelClass(nn.Module):
                     param.requires_grad = True
         else:
             self.model.train(True)
-
-    def get_seq_input(self, inputs, labels):
-        labels = labels
-        indices = torch.where(labels == self.values_to_find)
-
-        # on_idx = torch.where(labels == torch.tensor([7]))
-        # on = on_idx[1] // 16
-
-        inputs = (inputs.to(self.device), labels.to(self.device))
-        labs = indices[2].to(self.device)
-        return inputs, labs
-
-    def handle_both(self, outputs, labels):
-        o1, o2_pack = outputs
-        o2, idx = o2_pack
-        lab1 = labels[:, 0]
-        lab2 = labels[:, 1]
-
-        # self.my_logger.info(labels.shape, lab1.shape, lab2.shape)
-        loss1 = self.loss_fun(o1, lab1)
-        if o2 is not None:
-            loss2 = self.loss_fun(o2, lab2[idx])
-
-            return (loss1+loss2)/2, (o1, o2), (lab1, lab2[idx])
-        else:
-            return loss1, (o1, o2), (lab1, lab2[idx])
 
 
 class DistillatioModels(nn.Module):
@@ -502,9 +359,8 @@ class DistillatioModels(nn.Module):
 
         self.encoder_only_teacher = as_encoder
 
-    def train_one_epoch(self,epoch_index,tot_epochs):
-        running_loss = 0.
-        last_loss = 0.
+    def train_one_epoch(self, epoch_index, tot_epochs):
+        self.loss_fun.reset()
 
         # initializing progress bar
         description = 'Training'
@@ -523,7 +379,7 @@ class DistillatioModels(nn.Module):
                 with torch.no_grad():
                     labs = self.teacher(sam_in)
             else:
-                inputs, labs = data
+                inputs, labs, polys = data
                 labs = labs.to(self.device)
 
             inputs = inputs.to(self.device)
@@ -551,9 +407,7 @@ class DistillatioModels(nn.Module):
 
             del inputs, sam_in
 
-            running_loss += loss.item()
-            last_loss = running_loss #/ self.train_loader.batch_size  # loss per batch
-            running_loss = 0.
+            current_loss = self.loss_fun.get_current_value(batch)
 
             with torch.no_grad():
                 # computing training metrics
@@ -564,7 +418,7 @@ class DistillatioModels(nn.Module):
             # updating pbar
             if self.encoder_only_teacher:
                 pbar_loader.set_description(f'Epoch {epoch_index}/{tot_epochs-1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
-                                            f'train_loss (mse): {last_loss:.4f}')
+                                            f'train_loss (mse): {current_loss:.4f}')
             else:
                 raise AttributeError('training with decoder not yet implementeeeeeeddddddd.....')
 
@@ -572,11 +426,10 @@ class DistillatioModels(nn.Module):
                 torch.cuda.synchronize()
 
         # updating dictionary
-        self.metrics.on_train_end(last_loss)
+        self.metrics.on_train_end(batch + 1)
 
     def val_loop(self, epoch):
-        running_loss = 0.0
-        last_loss = 0.0
+        self.loss_fun.reset()
 
         #resetting metrics for validation
         self.metrics.on_val_start()
@@ -601,7 +454,7 @@ class DistillatioModels(nn.Module):
                     sam_in = [x.numpy() for x in inputs.permute(0, 2, 3, 1)]
                     labels = self.teacher(sam_in)
                 else:
-                    inputs, labels = data
+                    inputs, labels, polys = data
                     labels = labels.to(self.device)
 
                 inputs = inputs.to(self.device)
@@ -616,11 +469,9 @@ class DistillatioModels(nn.Module):
 
                 del inputs, sam_in
 
-                loss = self.loss_fun(student_out, labels)
+                _ = self.loss_fun(student_out, labels)
 
-                running_loss += loss.item()
-                last_loss = running_loss #/ self.val_loader.batch_size  # loss per batch
-                running_loss = 0.0
+                current_loss = self.loss_fun.get_current_value(batch)
 
                 if self.device != "cpu":
                     torch.cuda.synchronize()
@@ -634,14 +485,14 @@ class DistillatioModels(nn.Module):
 
                 # updating pbar
                 if self.encoder_only_teacher:
-                    description = f'Validation: val_loss (mse): {last_loss:.4f}'
+                    description = f'Validation: val_loss (mse): {current_loss:.4f}'
                 else:
                     raise AttributeError('not yet implemented the detectorrrr')
                 pbar_loader.set_description(description)
 
         if student_out is not None:
             # updating metrics dict
-            self.metrics.on_val_end(last_loss)
+            self.metrics.on_val_end(batch + 1)
 
             # updating loggers (roc, prc)
             self.loggers.on_val_end()
@@ -698,6 +549,47 @@ from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 
 
+# same in image handling becouse i'm having problem with imports....
+def bbox_from_poly(masks_batch, return_dict=False):
+    """
+    Retrieves bounding boxes for each give polygonals.
+
+    args:
+        - masks_batch: list of masks polygons lists (masks polygons in same format as above [[(polys, id)...]...] )
+        - return_dict: if True it returns a list of dicts (1 per img) where each key is a class containing list of top_left
+                       and bottom_right corners of bboxes. Else it returns a list like [[(bbox, id)...]...] )
+                       where bbox is a tuple containing xyxy coord of bbox
+                       (NOTE it is different from polys, here 1 tuple x box)
+    Returns:
+        bboxes_list:
+    """
+
+    bboxes_list = []
+    for masks_instance in masks_batch:
+        bbox_dict = {}
+        for masks, class_id in masks_instance:
+            bboxes = []
+
+            for polygon in masks:
+
+                min_x, min_y = np.min(polygon, axis=0)
+                max_x, max_y = np.max(polygon, axis=0)
+
+                bboxes.append((min_x, min_y, max_x, max_y))
+                bbox_dict[class_id] = bboxes
+
+        # sorting classes for consistency
+        if return_dict:
+            bboxes_list.append({k: bbox_dict[k] for k in sorted(bbox_dict.keys())})
+        else:
+            bb = []
+            for k in sorted(bbox_dict.keys()):
+                bb += [(x, k) for x in bbox_dict[k]]
+            bboxes_list.append(bb)
+    return bboxes_list
+
+
+
 class SAM2handler(nn.Module):
     def __init__(self, sam2_checkpoint, model_cfg, info_log, as_encoder=False):
         super().__init__()
@@ -723,8 +615,9 @@ class SAM2handler(nn.Module):
             prompt_batch, ids = self.get_prompts(polys)
             # think about how to use scores for better loss computing
             # (maybe if the SAM score is low i can low yhe distillation loss and vice-versa idk...)
-            logits, scores, _ = self.predictor.predict_batch(point_coords_batch=None, point_labels_batch=None, box_batch=prompt_batch,
-                                                   multimask_output=False, return_logits=True)
+            logits, scores, _ = self.predictor.predict_batch(point_coords_batch=None, point_labels_batch=None,
+                                                             box_batch=prompt_batch, multimask_output=False,
+                                                             return_logits=True)
             # logits list [len N, [len bboxes, [np.array HxW]]]
 
     # to min_max the logits for stacking to comparable class volumes
@@ -733,6 +626,14 @@ class SAM2handler(nn.Module):
         return (x - np.min(x)) / (np.max(x) - np.min(x))
 
     def get_prompts(self, polys):
+        """
+
+        args:
+            - polys: list of masks polygons lists (masks polygons in format [[(polys, id)...]...] )
+        returns:
+            - prompt_batch: list of np.array containing bbox xyxy for each instance for each batch element (SAM shape)
+            - ids: list of class id per bbox (for alignment)
+        """
 
         bboxes = bbox_from_poly(polys)  # bboxes as list [[(bboxes, id)...]...]
         prompt_batch = []
