@@ -83,11 +83,11 @@ def main(args):
         student = args.student
 
     # double-checking whether you parsed weights or model and accounting for transfer learning
-    mod = check_load_model(student, args.backbone)
+    student = check_load_model(student, args.backbone)
 
     # initializing callbacks ( could be handled more concisely i guess...)
     stopper = EarlyStopping(patience=args.patience, monitor="val_loss", mode="min")
-    saver = Saver(model=mod, save_best=True, save_path=save_path, monitor="val_loss", mode='min')
+    saver = Saver(model=student, save_best=True, save_path=save_path, monitor="val_loss", mode='min')
     callbacks = Callbacks([stopper, saver])
 
     # for encoder only it is just empty, ADJUST for decoder then
@@ -105,7 +105,7 @@ def main(args):
     else:
         loss_fn = SemanticLosses(alpha=1, gamma=2, lambdas=(0.5, 0.5), weight=None)  # maybe consider weights...
 
-    opt = get_optimizer(mod, args.opt, args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
+    opt = get_optimizer(student, args.opt, args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
 
     # initializing loggers
     logger = Loggers(metrics=metrics, save_path=save_path, opt=opt, test=False, wandb=bool(wandb_name))
