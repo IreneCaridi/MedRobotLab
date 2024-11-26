@@ -6,13 +6,13 @@ from pathlib import Path
 
 import wandb
 
-from models import DistillatioModels, check_load_model, SAM2handler
+from models import DistillatioModels, check_load_model, SAM2handler, ModelClass
 from models.common import Dummy, UNetEncoderTrain
 from models.Rep_ViT import RepViT
 from utils.DL.callbacks import Callbacks, EarlyStopping, Saver
 from utils.DL.loaders import load_all
 from utils.DL.optimizers import get_optimizer, scheduler
-from utils.DL.losses import SemanticLosses
+from utils.DL.losses import SemanticLosses, FullLossKD, MSELoss
 from utils.DL.metrics import Metrics
 from utils.DL.logger import Loggers
 from utils import random_state, increment_path, json_from_parser, my_logger
@@ -48,8 +48,15 @@ def main(args):
 
     if args.as_encoder:
         enc_flag = True
+        loss_fn = MSELoss(reduction="mean")
     elif args.as_predictor:
         enc_flag = False
+        loss_fn = FullLossKD(lamda_dist=0.25, alpha=1, gamma=2, lambdas_focal=(0.5, 0.5), weights=None)
+    elif args.only_supervised:
+        enc_flag = True
+        loss_fn = SemanticLosses(alpha=1, gamma=2, lambdas=(0.5, 0.5), weight=None)  # maybe consider weights...
+    else:
+        raise AttributeError('ok it should not be possible to get there, you broke the parser lol')
 
     # saving inputs
     json_from_parser(args, save_path)
@@ -83,15 +90,15 @@ def main(args):
         student = args.student
 
     # double-checking whether you parsed weights or model and accounting for transfer learning
-    mod = check_load_model(student, args.backbone)
+    student = check_load_model(student, args.backbone)
 
     # initializing callbacks ( could be handled more concisely i guess...)
     stopper = EarlyStopping(patience=args.patience, monitor="val_loss", mode="min")
-    saver = Saver(model=mod, save_best=True, save_path=save_path, monitor="val_loss", mode='min')
+    saver = Saver(model=student, save_best=True, save_path=save_path, monitor="val_loss", mode='min')
     callbacks = Callbacks([stopper, saver])
 
     # for encoder only it is just empty, ADJUST for decoder then
-    metrics = Metrics(num_classes=3, device=device, top_k=1, thresh=0.5)
+    metrics = Metrics(loss_fn=loss_fn, num_classes=3, device=device, top_k=1, thresh=0.5)
 
     # if args.weighted_loss:
     # if args.cropped_seq or args.cropped_seq_raw:
@@ -99,13 +106,7 @@ def main(args):
     # else:
     #     weights = None
 
-    # initializing loss and optimizer
-    if enc_flag:
-        loss_fn = nn.MSELoss(reduction="mean")
-    else:
-        loss_fn = SemanticLosses(alpha=1, gamma=2, lambdas=(0.5, 0.5), weight=None)  # maybe consider weights...
-
-    opt = get_optimizer(mod, args.opt, args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
+    opt = get_optimizer(student, args.opt, args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
 
     # initializing loggers
     logger = Loggers(metrics=metrics, save_path=save_path, opt=opt, test=False, wandb=bool(wandb_name))
@@ -123,9 +124,13 @@ def main(args):
                           as_encoder=enc_flag)
 
     # building model
-    model = DistillatioModels(student, teacher, loaders, info_log=my_logger, loss_fn=loss_fn, device=device, AMP=args.AMP,
-                              optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
-                              as_encoder=enc_flag)
+    if args.only_supervised:
+        model = ModelClass(student, loaders, info_log=my_logger, loss_fn=loss_fn, device=device, AMP=args.AMP,
+                           optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched, freeze=None)
+    else:
+        model = DistillatioModels(student, teacher, loaders, info_log=my_logger, loss_fn=loss_fn, device=device, AMP=args.AMP,
+                                  optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
+                                  as_encoder=enc_flag)
 
     # initializing wandb
     if wandb_name:
@@ -183,9 +188,10 @@ if __name__ == "__main__":
     group1 = parser.add_mutually_exclusive_group(required=True)
     group1.add_argument('--as_encoder', action="store_true", help='whether to do encoder KD')
     group1.add_argument('--as_predictor', action="store_true", help='whether to do masks KD')
+    group1.add_argument('--only_supervised', action="store_true", help='whether to train with just gt (no KD)')
 
     # loaders params
-    parser.add_argument('--n_workers', type=int, default=7, help='number of workers for parallel dataloading ')
+    parser.add_argument('--n_workers', type=int, default=4, help='number of workers for parallel dataloading ')
     parser.add_argument('--pin_memory', type=bool, default=True, help='whether to pin memory for more efficient passage to gpu')
 
     args = parser.parse_args()

@@ -37,8 +37,8 @@ class LogsHolder(BaseCallback):
                     self.dict[key].append(self.metrics.dict[key][0])
                 else:
                     for i in range(len(self.metrics.dict[key])):
-                        self.dict[key+f"_{i}"].append(self.metrics.dict[key][i][0])
-                    flat = [item[0] for item in self.metrics.dict[key]]
+                        self.dict[key+f"_{i}"].append(self.metrics.dict[key][i])
+                    flat = [item for item in self.metrics.dict[key]]
                     self.dict[key].append(np.float16(sum(flat)/len(flat)))  # mean value
         else:
             for key in self.metrics.dict:
@@ -47,8 +47,8 @@ class LogsHolder(BaseCallback):
                         pass
                     else:
                         for i in range(len(self.metrics.dict[key])):
-                            self.dict[key+f"_{i}"].append(self.metrics.dict[key][i][0])
-                        flat = [item[0] for item in self.metrics.dict[key]]
+                            self.dict[key+f"_{i}"].append(self.metrics.dict[key][i])
+                        flat = [item for item in self.metrics.dict[key]]
                         self.dict[key].append(np.float16(sum(flat)/len(flat)))  # mean value
         if self.wandb:
             dd = {k: self.dict[k][-1] for k in self.dict.keys()}
