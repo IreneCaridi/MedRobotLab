@@ -541,9 +541,8 @@ class DistillatioModels(nn.Module):
 
 # placing myself in sam2
 current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+parent_dir = os.path.dirname(os.path.dirname(current_dir))
 sys.path.append(str(Path(parent_dir) / 'sam2'))
-
 
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor

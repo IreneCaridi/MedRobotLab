@@ -1034,16 +1034,18 @@ class UnetEncoder(nn.Module):
         self.down4 = UnetDown(
             self.ch_dims[3], self.ch_dims[4], self.dropout[4])
 
+        self.up1 = UnetUpBlock(512, 256, dropout_p=0.0)
+
     def forward(self, x):     # ->  512x512x3
         x0 = self.stem(x)     # ->  512x512x32
         x1 = self.down1(x0)   # ->  256x256x64
         x2 = self.down2(x1)   # ->  128x128x128
         x3 = self.down3(x2)   # ->  64x64x256
         x4 = self.down4(x3)   # ->  32x32x512
-        return x0, x1, x2, x3, x4
+        x3 = self.up1(x4, x3) # ->  64x64x256
+        return x0, x1, x2, x3
 
 
-# adapted from "mamba U-net"
 class UnetDecoder(nn.Module):
     def __init__(self, n_classes=3):
         super().__init__()
@@ -1063,15 +1065,13 @@ class UnetDecoder(nn.Module):
         self.out_conv = nn.Conv2d(self.ch_dims[0], self.n_classes, 1, 1)
 
     def forward(self, features):
-        x0, x1, x2, x3, x4 = features
+        x0, x1, x2, x3 = features
 
-        x = self.up1(x4, x3)    # -> 64x64x256
-        x = self.up2(x, x2)     # -> 128x128x128
+        x = self.up2(x3, x2)     # -> 128x128x128
         x = self.up3(x, x1)     # -> 256x256x64
         x = self.up4(x, x0)     # -> 512x512x32
         out = self.out_conv(x)  # -> 512x512xN
         return out
-
 
 class UNet(nn.Module):
     def __init__(self, n_classes):
@@ -1085,16 +1085,3 @@ class UNet(nn.Module):
         out = self.decoder(features)  # raw logit output
         return out
 
-
-# includes a smal fpn to allow matching with sam embedding dims
-class UNetEncoderTrain(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        self.encoder = UnetEncoder()
-        self.up1 = UnetUpBlock(512, 256, dropout_p=0.0)
-
-    def forward(self, x):
-        x = self.encoder(x)
-
-        return self.up1(x[-1], x[-2])  # 64x64x256
