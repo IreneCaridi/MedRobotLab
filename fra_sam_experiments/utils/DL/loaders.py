@@ -275,14 +275,14 @@ def load_all(img_paths: list, reshape_mode=None, reshaped_size=1024, batch_size=
 
     train_loader = torch.utils.data.DataLoader(LoaderFromData(train, reshape_mode=reshape_mode, reshaped_size=reshaped_size),
                                                batch_size=batch_size, shuffle=True, pin_memory=pin_memory,
-                                               num_workers=n_workers, collate_fun=collate_fun)
+                                               num_workers=n_workers, collate_fn=collate_fun)
     val_loader = torch.utils.data.DataLoader(LoaderFromData(val, reshape_mode=reshape_mode, reshaped_size=reshaped_size),
                                              batch_size=batch_size, shuffle=True, pin_memory=pin_memory,
-                                             num_workers=n_workers, collate_fun=collate_fun)
+                                             num_workers=n_workers, collate_fn=collate_fun)
     if test_flag:
         test_loader = torch.utils.data.DataLoader(LoaderFromData(test, reshape_mode=reshape_mode, reshaped_size=reshaped_size),
                                                   batch_size=batch_size, shuffle=False, pin_memory=pin_memory,
-                                                  num_workers=n_workers, collate_fun=collate_fun)
+                                                  num_workers=n_workers, collate_fn=collate_fun)
         return train_loader, val_loader, test_loader
     else:
         return train_loader, val_loader

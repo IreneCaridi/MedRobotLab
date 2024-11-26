@@ -387,7 +387,7 @@ class RepViT(nn.Module):
     }
 
     def __init__(self, arch, img_size=1024, fuse=False, freeze=False,
-                 load_from=None, use_rpn=False, out_indices=None, upsample_mode='bicubic'):
+                 load_from=None, use_rpn=False, out_indices=['stem', 'stage0', 'stage1', 'final'], upsample_mode='bicubic'):
         super(RepViT, self).__init__()
         # setting of inverted residual blocks
         self.cfgs = self.arch_settings[arch]
@@ -481,10 +481,115 @@ class RepViT(nn.Module):
         if self.use_rpn:
             if self.out_indices is None:
                 self.out_indices = [len(output_dict) - 1]
-            out = []
-            for i, key in enumerate(output_dict):
-                if i in self.out_indices:
-                    out.append(output_dict[key])
+            out = [output_dict[k] for k in output_dict.keys() if k in self.out_indices]
             return tuple(out)
         return x
+
+
+class Conv2d_BN_UP(torch.nn.Sequential):
+    def __init__(self, a, b, ks=1, stride=1, pad=0, dilation=1, groups=1, bn_weight_init=1):
+        super().__init__()
+        self.add_module('c', torch.nn.ConvTranspose2d(a, b, ks, stride, pad, dilation, groups, bias=False))
+        self.add_module('bn', torch.nn.BatchNorm2d(b))
+        torch.nn.init.constant_(self.bn.weight, bn_weight_init)
+        torch.nn.init.constant_(self.bn.bias, 0)
+
+    @torch.no_grad()
+    def fuse(self):
+        c, bn = self._modules.values()
+        w = bn.weight / (bn.running_var + bn.eps) ** 0.5
+        w = c.weight * w[:, None, None, None]
+        b = bn.bias - bn.running_mean * bn.weight / \
+            (bn.running_var + bn.eps) ** 0.5
+        m = torch.nn.Conv2d(w.size(1) * self.c.groups, w.size(
+            0), w.shape[2:], stride=self.c.stride, padding=self.c.padding, dilation=self.c.dilation,
+                            groups=self.c.groups,
+                            device=c.weight.device)
+        m.weight.data.copy_(w)
+        m.bias.data.copy_(b)
+        return m
+
+
+class RepViTUP(nn.Module):
+    def __init__(self, inp, oup, kernel_size, stride, use_se, use_hs):
+        super().__init__()
+        assert stride in [2]
+
+        self.token_mixer = nn.Sequential(
+            Conv2d_BN_UP(inp, inp, kernel_size, stride, (kernel_size - 1) // 2, groups=inp),
+            SqueezeExcite(inp, 0.25) if use_se else nn.Identity(),
+            Conv2d_BN(inp, oup, ks=1, stride=1, pad=0)
+        )
+        self.channel_mixer = Residual(nn.Sequential(
+            # pw
+            Conv2d_BN(oup, 2 * oup, 1, 1, 0),
+            nn.GELU() if use_hs else nn.GELU(),
+            # pw-linear
+            Conv2d_BN(2 * oup, oup, 1, 1, 0, bn_weight_init=0),
+        ))
+
+    def forward(self, x):
+        return self.channel_mixer(self.token_mixer(x))
+
+class RepViTupCat(nn.Module):
+    def __init__(self, c):
+        super().__init__()
+        c_ = c//2
+        self.up = RepViTUP(c, c_, 3, 2, True, True)
+        self.pw = nn.Conv2d(c, c_, 1)
+
+    def forward(self, x):
+        x, x_cat = x
+        x = self.up(x)
+        x = torch.cat([x, x_cat], dim=1)
+        x = self.pw(x)
+        return x
+
+class RepViTDecoder(nn.Module):
+    def __init__(self, n_classes, upsample_stem=True):
+        super().__init__()
+
+        self.stages = nn.ModuleList([RepViTBlock(128, 256, 128, 3, 1, True, True),
+                                     RepViTBlock(64, 128, 64, 3, 1, True, True),
+                                     RepViTBlock(32, 64, 32, 3, 1, True, True),
+                                     RepViTBlock(8, 16, 8, 3, 1, True, True)])
+
+        self.ups = nn.ModuleList([RepViTupCat(256),
+                                  RepViTupCat(128),
+                                  RepViTupCat(64),
+                                  RepViTUP(32,8,3,2,True,True)])
+
+        self.head = nn.Conv2d(8, n_classes, 1)
+
+        if upsample_stem:
+            self.up_stem = RepViTUP(64,32,3,2,True,True)
+        else:
+            self.ups[2] = RepViTUP(64,32,3,2,True,True)
+            self.up_stem = None
+
+
+    def forward(self, x):
+        x_stem, x0, x1, x_f = x
+
+        x = self.stages[0](self.ups[0]((x_f, x1)))
+        x = self.stages[1](self.ups[1]((x, x0)))
+        x = self.ups[2]((x, self.up_stem(x_stem))) if self.up_stem else self.ups[2](x)
+        x = self.stages[2](x)
+        x = self.stages[3](self.ups[3](x))
+
+        return self.head(x)
+
+
+class RepViTUnet(nn.Module):
+    def __init__(self, arch, n_classes, img_size=1024, fuse=False, freeze=False,
+                 load_from=None, use_rpn=False, out_indices=['stem', 'stage0', 'stage1', 'final'], upsample_mode='bicubic', upsample_stem=True):
+        super().__init__()
+
+        self.encoder = RepViT(arch, img_size, fuse, freeze, load_from, use_rpn, out_indices, upsample_mode)
+        self.decoder = RepViTDecoder(n_classes, upsample_stem)
+
+    def forward(self, x):
+        return self.decoder(self.encoder(x))
+
+
 

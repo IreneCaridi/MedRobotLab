@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 
 # look at it, simply copied from chatgpt
@@ -44,7 +45,7 @@ def _reshape_mask(mask):
     return mask.reshape(mask.shape[0] * mask.shape[1], mask.shape[2] * mask.shape[3])
 
 
-def dice_loss(inputs, targets, valid=None, target_logit=False):
+def dice_loss_gpt(inputs, targets, valid=None, target_logit=False):
     """
     Compute the DICE loss, similar to generalized IOU for masks
     Args:
@@ -72,6 +73,29 @@ def dice_loss(inputs, targets, valid=None, target_logit=False):
     return loss.mean()
 
 
+class MSELoss(nn.Module):
+    def __init__(self, reduction='mean'):
+        super().__init__()
+        self.loss_fn = nn.MSELoss(reduction=reduction)
+
+        self.running_dict = {'loss': 0.}
+
+    def forward(self, x, y):
+        loss = self.loss_fn(x, y)
+        self.accumulate(loss)
+        return loss
+
+    def accumulate(self, batch_loss):
+        self.running_dict['loss'] += batch_loss.item()
+
+    def get_current_value(self, batch_n):
+        n = batch_n + 1  # batch_n is [0, N-1]
+        return self.running_dict['loss'] / n
+
+    def reset(self):
+        self.running_dict = {'loss': 0.}
+
+
 class SemanticFocalLoss(nn.Module):
     def __init__(self, alpha=1, gamma=2, weight=None):
         """
@@ -89,6 +113,7 @@ class SemanticFocalLoss(nn.Module):
 
         self.weight = weight
 
+        self.running_dict = {'loss': 0.}
 
     def forward(self, x, y):
         """
@@ -102,8 +127,19 @@ class SemanticFocalLoss(nn.Module):
         ce_loss = F.cross_entropy(x, y, reduction='none', weight=self.weight)  # shape BxHxW
         pt = torch.exp(-ce_loss)
         loss = self.alpha * (1 - pt) ** self.gamma * ce_loss  # shape BxHxW
+        self.accumulate(loss.mean())
 
         return loss.mean()
+
+    def accumulate(self, batch_loss):
+        self.running_dict['loss'] += batch_loss.item()
+
+    def get_current_value(self, batch_n):
+        n = batch_n + 1  # batch_n is [0, N-1]
+        return self.running_dict['loss'] / n
+
+    def reset(self):
+        self.running_dict['loss'] = 0.
 
 
 class SemanticDiceLoss(nn.Module):
@@ -127,7 +163,9 @@ class SemanticDiceLoss(nn.Module):
             y (torch.Tensor): Ground truth labels of shape [N, H, W].
 
         Returns:
-            torch.Tensor: Dice loss.
+            loss: torch.Tensor Dice loss.
+            dice: torch.Tensor with per class Dice inside batch
+
         """
 
         N, C = x.size()[:2]
@@ -154,7 +192,7 @@ class SemanticDiceLoss(nn.Module):
         # Average over classes and batches
         loss = 1 - torch.mean(dice)
 
-        return loss
+        return loss, dice.mean(dim=0).to('cpu').squeeze().numpy().astype(np.float16)
 
 
 class SemanticLosses(nn.Module):
@@ -179,11 +217,103 @@ class SemanticLosses(nn.Module):
 
         self.lambda1, self.lambda2 = lambdas
 
+        self.running_dict = {'loss': 0., 'focal_loss': 0., 'dice_loss': 0., 'dice': None}
+
     def forward(self, x, y):
         focal = self.loss1(x, y)
-        dice = self.loss2(x, y)
+        dice_loss, dice = self.loss2(x, y)
 
-        return self.lambda1 * focal + self.lambda2 * dice
+        batch_loss = self.lambda1 * focal + self.lambda2 * dice_loss
+
+        self.accumulate(batch_loss, focal, dice_loss, dice)
+
+        return batch_loss
+
+    def accumulate(self, batch_loss, focal_loss, dice_loss, dice):
+        self.running_dict['loss'] += batch_loss.item()
+        self.running_dict['focal_loss'] += focal_loss.item()
+        self.running_dict['dice_loss'] += dice_loss.item()
+        if not self.running_dict['dice']:
+            self.running_dict['dice'] = dice
+        else:
+            self.running_dict['dice'] += dice
+
+    def get_current_value(self, batch_n, only_loss=True):
+        n = batch_n + 1  # batch_n is [0, N-1]
+
+        if only_loss:
+            return self.running_dict['loss'] / n
+        else:
+            return {self.running_dict[k] / n for k in self.running_dict.keys()}
+
+    def reset(self):
+        self.running_dict = {'loss': 0., 'focal_loss': 0., 'dice_loss': 0., 'dice': None}
+
+
+class DistillationLoss(nn.Module):
+    def __init__(self, loss_fn='KL', temp=2.5):
+        super().__init__()
+
+        assert loss_fn in ['KL'], f'"{loss_fn}" not recognised as loss function. use "KL" or "CE" '
+        if loss_fn == 'KL':
+            self.loss_fn = nn.KLDivLoss(reduction='batchmean')
+        else:
+            raise AttributeError(f'"{loss_fn}" not recognised as loss. use "KL" or "CE" ')
+
+        self.softmax_s = nn.LogSoftmax(dim=1)
+        self.softmax_t = nn.Softmax(dim=1)
+        self.temp = temp
+
+    def forward(self, s, t):
+        # s = student, t = teacher
+        return self.loss_fn(self.softmax_s(s / self.temp), self.softmax(t / self.temp))
+
+
+class FullLossKD(nn.Module):
+    def __init__(self, lamda_dist=0.25, alpha=1, gamma=2, lambdas_focal=(0.5, 0.5), weights=None):
+        super().__init__()
+
+        self.l_gt = SemanticLosses(alpha, gamma, lambdas_focal, weights)
+        self.l_KD = DistillationLoss('KL', 2.5)
+
+        self.lambda_dist = lamda_dist
+
+        self.running_dict = {'loss': 0., 'gt_loss': 0., 'kd_loss': 0.} | \
+                            {k: self.l_gt.running_dict[k] for k in self.l_gt.running_dict.keys() if k != 'loss'}
+
+    def forward(self, x_s, gt, y_t):
+
+        gt_loss = self.l_gt(x_s, gt)
+        kd_loss = self.l_KD(x_s, y_t)
+
+        loss = (1 - self.lambda_dist) * gt_loss + self.lambda_dist * kd_loss
+
+        self.accumulate(loss, gt_loss, kd_loss)
+
+        return loss
+
+    def accumulate(self, batch_loss, loss_gt, loss_kd):
+        self.running_dict['loss'] += batch_loss.item()
+        self.running_dict['gt_loss'] += loss_gt.item()
+        self.running_dict['kd_loss'] += loss_kd.item()
+
+    def get_current_value(self, batch_n, only_loss=True):
+        gt_dict = self.l_gt.get_current_value(batch_n, False)
+
+        del gt_dict['loss']
+
+        self.running_dict.update(gt_dict)
+        n = batch_n + 1  # batch_n is [0, N-1]
+        if only_loss:
+            return self.running_dict['loss'] / n
+        else:
+            return {self.running_dict[k] / n for k in self.running_dict.keys()}
+
+    def reset(self):
+        self.l_gt.reset()
+        self.running_dict = {'loss': 0., 'gt_loss': 0., 'kd_loss': 0.} | \
+                            {k: self.l_gt.running_dict[k] for k in self.l_gt.running_dict.keys() if k != 'loss'}
+
 
 
 
