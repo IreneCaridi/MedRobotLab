@@ -569,6 +569,7 @@ class RepViTDecoder(nn.Module):
 
 
     def forward(self, x):
+        # RepViT encoder use_rpn = True
         x_stem, x0, x1, x_f = x
 
         x = self.stages[0](self.ups[0]((x_f, x1)))
@@ -581,8 +582,9 @@ class RepViTDecoder(nn.Module):
 
 
 class RepViTUnet(nn.Module):
-    def __init__(self, arch, n_classes, img_size=1024, fuse=False, freeze=False,
-                 load_from=None, use_rpn=False, out_indices=['stem', 'stage0', 'stage1', 'final'], upsample_mode='bicubic', upsample_stem=True):
+    # use_rpn is == True to allow for decoder
+    def __init__(self, arch='m2', n_classes=4, img_size=1024, fuse=False, freeze=False,
+                 load_from=None, use_rpn=True, out_indices=['stem', 'stage0', 'stage1', 'final'], upsample_mode='bicubic', upsample_stem=True):
         super().__init__()
 
         self.encoder = RepViT(arch, img_size, fuse, freeze, load_from, use_rpn, out_indices, upsample_mode)

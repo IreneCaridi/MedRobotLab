@@ -1017,7 +1017,7 @@ class MLPattDo(nn.Module):
 
 # adapted from "mamba U-net"
 class UnetEncoder(nn.Module):
-    def __init__(self):
+    def __init__(self, return_stages=False):
         super().__init__()
         self.in_ch = 3  # RGB
         self.ch_dims = [32, 64, 128, 256, 512]
@@ -1036,6 +1036,8 @@ class UnetEncoder(nn.Module):
 
         self.up1 = UnetUpBlock(512, 256, dropout_p=0.0)
 
+        self.return_stages = return_stages
+
     def forward(self, x):     # ->  512x512x3
         x0 = self.stem(x)     # ->  512x512x32
         x1 = self.down1(x0)   # ->  256x256x64
@@ -1043,7 +1045,10 @@ class UnetEncoder(nn.Module):
         x3 = self.down3(x2)   # ->  64x64x256
         x4 = self.down4(x3)   # ->  32x32x512
         x3 = self.up1(x4, x3) # ->  64x64x256
-        return x0, x1, x2, x3
+        if self.return_stages:
+            return x0, x1, x2, x3
+        else:
+            return x3
 
 
 class UnetDecoder(nn.Module):
@@ -1077,7 +1082,7 @@ class UNet(nn.Module):
     def __init__(self, n_classes):
         super().__init__()
 
-        self.encoder = UnetEncoder()
+        self.encoder = UnetEncoder(return_stages=True)
         self.decoder = UnetDecoder(n_classes)
 
     def forward(self, x):
