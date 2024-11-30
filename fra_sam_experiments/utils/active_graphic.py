@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import matplotlib.pyplot as plt
 import cv2
 from . import random_state
@@ -136,3 +136,53 @@ def annotate_image(image_path):
 
     # Return the points collected for each label
     return labeled_points
+
+
+def get_batch_and_dataset_gui():
+
+    print('waiting for user input...')
+
+    # Create main window
+    root = tk.Tk()
+    root.title("Parameter Input")
+    inputs = {"batch_size": None, "path": None}
+
+    def submit():
+        """Validate inputs and close the GUI if valid."""
+        try:
+            # Validate batch size (mandatory and integer)
+            batch_size = int(entry_batch.get())
+            inputs["batch_size"] = batch_size
+        except ValueError:
+            messagebox.showerror("Input Error", "Batch size must be an integer.")
+            return
+
+        # Collect paths, allow skipping only if at least one path is provided
+        path = entry_path1.get().strip()
+
+        inputs["path"] = path
+
+        if not path:
+            messagebox.showerror("Input Error", "At least one path must be provided.")
+            return
+
+        # If validation passes, close the GUI
+        root.destroy()
+
+    # Create labels and input fields
+    tk.Label(root, text="Batch Size (mandatory):").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
+    entry_batch = tk.Entry(root)
+    entry_batch.grid(row=0, column=1, padx=5, pady=5)
+
+    tk.Label(root, text="Dataset Path:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=5)
+    entry_path1 = tk.Entry(root)
+    entry_path1.grid(row=1, column=1, padx=5, pady=5)
+
+    # Add submit button
+    tk.Button(root, text="Submit", command=submit).grid(row=4, column=0, columnspan=2, pady=10)
+
+    # Run the GUI
+    root.mainloop()
+
+    return inputs
+

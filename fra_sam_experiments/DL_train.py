@@ -7,7 +7,7 @@ from pathlib import Path
 import wandb
 
 from models import DistillatioModels, check_load_model, SAM2handler, ModelClass
-from models.common import Dummy, UNetEncoderTrain
+from models.common import Dummy, UnetEncoder
 from models.Rep_ViT import RepViT
 from utils.DL.callbacks import Callbacks, EarlyStopping, Saver
 from utils.DL.loaders import load_all
@@ -25,6 +25,10 @@ parent_dir = os.path.dirname(current_dir)
 
 
 def main(args):
+
+    if args.MMI:
+        raise AttributeError('eh eh eh MMI dataset is not available uuuhhhhhh (do not flag args.MMI)')
+
 
     #checking wandb
     if args.wandb == 'None' or args.wandb == 'none' or args.wandb == 'False' or args.wandb == 'false':
@@ -44,7 +48,7 @@ def main(args):
     epochs = args.epochs
     batch_size = args.batch_size
     device = args.device
-    # out_classes = args.n_class + 1  # +1 for bkg
+    out_classes = args.n_class + 1  # +1 for bkg
 
     if args.as_encoder:
         enc_flag = True
@@ -62,10 +66,14 @@ def main(args):
     json_from_parser(args, save_path)
 
     # checking for dataset
-    if not args.MMI and not args.Cholect and not args.AtlasDione:
-        raise AttributeError('at least one of --MMI, --Cholect, --AtlasDione dataset arguments must be provided...')
+    if not args.MMI and not args.Cholect and not args.AtlasDione and not args.Kvasir:
+        raise AttributeError('at least one of --MMI, --Cholect, --AtlasDione, --Kvasir arguments must be provided...')
     else:
-        data_paths = [p for p in [args.MMI, args.Cholect, args.AtlasDione] if p is not None]
+
+        # if we get MMI data put them...
+        dataset_path = Path(args.data_path)
+        data_paths = [dataset_path / p for f, p in zip([args.Cholect, args.AtlasDione, args.Kvasir],
+                                                       ['Cholect_dataset', 'AtlasDione_dataset', 'kvasir_dataset']) if f]
 
     assert args.reshape_mode and args.reshape_size, 'both --reshape_size and --reshape_mode are needed together...'
 
@@ -78,11 +86,11 @@ def main(args):
         # means it is not a weight and has to be imported ADJUST => (NEED TO IMPORT IT)
         if args.student == "Dummy":
             student = Dummy()
-        elif args.student == 'UNetEncoderTrain':
-            student = UNetEncoderTrain()
+        elif args.student == 'UnetEncoder':
+            student = UnetEncoder()
             # loading model = bla bla bla
         elif args.student == 'RepViT':
-            student = RepViT('m1', args.reshape_size, fuse=True)
+            student = RepViT('m2', args.reshape_size, fuse=True)
         else:
             raise TypeError("Model name not recognised")
     else:
@@ -180,10 +188,13 @@ if __name__ == "__main__":
     # probably not userfull
     parser.add_argument('--weighted_loss', action="store_true", help='whether to weight the loss and weight for classes')
 
-    # datasets (ok they have 3 names but actually its just because I have 3 paths...)
-    parser.add_argument('--MMI', type=str, default=None, help='path to MMI dataset')
-    parser.add_argument('--Cholect', type=str, default=None, help='path to Cholect dataset')
-    parser.add_argument('--AtlasDione', type=str, default=None, help='path to AtlasDione dataset')
+    # datasets
+    parser.add_argument('--data_path', type=str, required=True, help='path to dataset (containing the ones below)')
+    # at least one is mandatory
+    parser.add_argument('--MMI', action="store_true", help='whether to use MMI dataset')
+    parser.add_argument('--Cholect', action="store_true", help='whether to use Cholect dataset')
+    parser.add_argument('--AtlasDione', action="store_true", help='whether to use AtlasDione dataset')
+    parser.add_argument('--Kvasir', action="store_true", help='whether to use Kvasir dataset')
 
     group1 = parser.add_mutually_exclusive_group(required=True)
     group1.add_argument('--as_encoder', action="store_true", help='whether to do encoder KD')
@@ -191,7 +202,7 @@ if __name__ == "__main__":
     group1.add_argument('--only_supervised', action="store_true", help='whether to train with just gt (no KD)')
 
     # loaders params
-    parser.add_argument('--n_workers', type=int, default=4, help='number of workers for parallel dataloading ')
+    parser.add_argument('--n_workers', type=int, default=0, help='number of workers for parallel dataloading ')
     parser.add_argument('--pin_memory', type=bool, default=True, help='whether to pin memory for more efficient passage to gpu')
 
     args = parser.parse_args()
