@@ -1,0 +1,16 @@
+services:
+  training:
+    build:
+      context: .             # La cartella corrente (dove si trova il docker-compose.yml) è la cartella di contesto per la build
+      dockerfile: Dockerfile # Specifica che il Dockerfile da utilizzare è "Dockerfile" nella cartella di contesto
+    container_name: teacher-student-training  # Assegna un nome al container creato
+    runtime: nvidia             # Usa il runtime NVIDIA per accedere alle GPU
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all # Rende tutte le GPU visibili al container
+    ports:
+      - "8080:8080"          # Mappa la porta 8080 del container alla porta 8080 dell'host
+    volumes:
+      - ./fra_sam_experiments:/MedRobotLab/fra_sam_experiments
+      - ./sam2:/MedRobotLab/sam2
+      - C:\Users\User\Desktop\datasets\dataset_self:/MedRobotLab/dataset
+    command: python fra_sam_experiments/train_many.py  # Il comando da eseguire al lancio del container (esegue main.py con Python)
