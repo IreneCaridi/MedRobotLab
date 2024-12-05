@@ -12,5 +12,5 @@ services:
     volumes:
       - ./fra_sam_experiments:/MedRobotLab/fra_sam_experiments
       - ./sam2:/MedRobotLab/sam2
-      - C:\Users\User\Desktop\datasets\dataset_self:/MedRobotLab/dataset
+      - <PATH AL TUO DATASET>:/MedRobotLab/dataset
     command: python fra_sam_experiments/train_many.py  # Il comando da eseguire al lancio del container (esegue main.py con Python)

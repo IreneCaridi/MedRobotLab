@@ -10,5 +10,5 @@ COPY ./requirements.txt /MedRobotLab/requirements.txt
 WORKDIR /MedRobotLab
 
 # Installa le dipendenze del progetto
-RUN pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 RUN pip install -r requirements.txt
