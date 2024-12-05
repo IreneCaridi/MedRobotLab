@@ -58,7 +58,8 @@ class DummyLoader(torch.utils.data.Dataset):
 
 
 class LoaderFromPath:
-    def __init__(self, data_path, reshape_mode=None, reshaped_size=640, test_flag=False, use_label=False, store_imgs=False):
+    def __init__(self, data_path, reshape_mode=None, reshaped_size=640, test_flag=False, use_label=False, store_imgs=False,
+                 use_bbox=False):
         """
         gets the data path and loads images or path-to-images split datasets
 
@@ -84,6 +85,7 @@ class LoaderFromPath:
             self.lab_suffix = None
 
         self.store_imgs = store_imgs
+        self.use_bbox = use_bbox
 
         self.test_flag = test_flag
         self.train, self.val, self.test = self.load_imgs()

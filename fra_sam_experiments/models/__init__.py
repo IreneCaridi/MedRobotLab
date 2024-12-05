@@ -39,7 +39,7 @@ def check_load_model(model, backbone_weights):
 
 class ModelClass(nn.Module):
     def __init__(self, model, loaders, device='cpu', callbacks=None, loss_fn=None, optimizer=None, sched=None,
-                 metrics=None, loggers=None, AMP=True, freeze=None, info_log=None):
+                 metrics=None, loggers=None, AMP=True, freeze=None, info_log=None, is_det=False):
         super().__init__()
         """
         :param
@@ -51,6 +51,7 @@ class ModelClass(nn.Module):
             --AMP: Automatic Mixed Precision 
             --freeze: list containing names of layers to freeze
             --sequences: to handle windowed input sequences
+            --is_det: flag whether you are using a detection head
         """
 
         self.freeze = freeze
@@ -99,6 +100,8 @@ class ModelClass(nn.Module):
         else:
             self.AMP = False
 
+        self.is_det = is_det
+
     def train_one_epoch(self, epoch_index, tot_epochs):
         self.loss_fun.reset()
 
@@ -114,23 +117,37 @@ class ModelClass(nn.Module):
 
             inputs, labs, _ = data   # 3rd unpacked value are polys (I don't wont to change the collate and loaders...)
             inputs = inputs.to(self.device)
-            labs = labs.to(self.device)
+            if not self.is_det:
+                labs = labs.to(self.device)
+            else:
+                labs.bboxes = labs.bboxes.to(self.device)
+                labs.labels = labs.labels.to(self.device)
 
             self.opt.zero_grad()
 
             if self.AMP:
                 with autocast():
-                    outputs = self.model(inputs)
-
-                    loss = self.loss_fun(outputs, labs)
+                    if not self.is_det:
+                        outputs = self.model(inputs)
+                        loss = self.loss_fun(outputs, labs)
+                    else:
+                        x_enc, x_raw, x_pred = self.model(inputs)
+                        loss_dict = self.model.get_loss(x_raw, labs)
+                        # {'loss_cls': tensor(1.3182, grad_fn=<DivBackward0>), 'loss_bbox': tensor(5., grad_fn=<DivBackward0>), 'loss_obj': tensor(29777.5078, grad_fn=<DivBackward0>)}
+                        # here understund how to get the loss (probabl an obj that has the model inside and actually
+                        # computes the loss calling inside .get_loss of the model
 
                     self.scaler.scale(loss).backward()
                     self.scaler.step(self.opt)
                     self.scaler.update()
             else:
-                outputs = self.model(inputs)
-
-                loss = self.loss_fun(outputs, labs)
+                if not self.is_det:
+                    outputs = self.model(inputs)
+                    loss = self.loss_fun(outputs, labs)
+                else:
+                    x_enc, x_raw, x_pred = self.model(inputs)
+                    loss_dict = self.model.get_loss(x_raw, labs)
+                    #  here understand how to get the loss
                 loss.backward()
                 self.opt.step()
 
@@ -189,11 +206,19 @@ class ModelClass(nn.Module):
 
                 inputs, labels, _ = data  # _ == polys...
                 inputs = inputs.to(self.device)
-                labels = labels.to(self.device)
 
-                outputs = self.model(inputs)
+                if not self.is_det:
+                    labels = labels.to(self.device)
+                else:
+                    labels.bboxes = labels.bboxes.to(self.device)
+                    labels.labels = labels.labels.to(self.device)
 
-                _ = self.loss_fun(outputs, labels)
+                if not self.is_det:
+                    outputs = self.model(inputs)
+                    _ = self.loss_fun(outputs, labels)
+                else:
+                    x_enc, x_raw, x_pred = self.model(inputs)
+                    loss_dict = self.model.get_loss(x_raw, labels)
 
                 current_loss = self.loss_fun.get_current_value(batch)
 
