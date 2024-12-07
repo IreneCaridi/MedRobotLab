@@ -15,7 +15,7 @@ import subprocess
 dataset_path = "/MedRobotLab/dataset" #questo da non modificare
 
 
-batch_size = 16 # questa da modificare a piacere
+batch_size = 4 # questa da modificare a piacere
 
 
 arguments_list = [
@@ -47,5 +47,5 @@ for args in arguments_list:
 
     cmd = ["python", script_name] + args
     subprocess.run(cmd)
-    break
+
 
