@@ -404,3 +404,45 @@ def extract_true_mask(true_contour, image_width, image_height):
     true_masks = np.stack(true_masks)
 
     return true_masks
+
+    import numpy as np
+import cv2
+import json
+
+def extract_true_mask_json(json_file, image_width, image_height):
+    """
+    Extracts masks from a JSON file formatted as described.
+
+    Parameters:
+        json_file (str): Path to the JSON file containing contour data.
+        image_width (int): Width of the image.
+        image_height (int): Height of the image.
+
+    Returns:
+        np.ndarray: A stacked NumPy array of binary masks.
+    """
+    # Open and load the JSON file
+    with open(json_file, 'r') as file:
+        json_data = json.load(file)
+
+    # Initialize a list to hold the masks
+    true_masks = []
+
+    # Process each shape in the JSON data
+    for shape in json_data.get("shapes", []):
+        # Extract points as pixel coordinates
+        contour_points = [(int(x), int(y)) for x, y in shape["points"]]
+
+        # Create an empty mask for the current contour
+        mask = np.zeros((image_height, image_width), dtype=np.uint8)
+
+        # Fill the polygon for the current contour
+        cv2.fillPoly(mask, [np.array(contour_points, dtype=np.int32)], 1)
+
+        # Append the mask to the list
+        true_masks.append(mask)
+
+    # Stack the masks into a single NumPy array for further processing
+    true_masks = np.stack(true_masks)
+
+    return true_masks

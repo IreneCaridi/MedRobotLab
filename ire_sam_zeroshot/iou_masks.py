@@ -26,12 +26,12 @@ import matplotlib
 matplotlib.use("tkagg")
 import matplotlib.pyplot as plt
 import cv2
-from functions.mask import extract_true_mask
+from functions.mask import extract_true_mask_json
 
 
 # Select the device for computation
-#device = check_device()
-device = torch.device("cpu")
+device = check_device()
+#device = torch.device("cpu")
 
 if __name__ == '__main__':
     # Load predictor
@@ -41,12 +41,12 @@ if __name__ == '__main__':
     predictor = SAM2ImagePredictor(sam2_model)
 
     # Define directories
-    folder_images = '../image/dataset_mmi/images/test'
-    folder_points = '../image/dataset_mmi/points/test'
-    folder_labels = '../image/dataset_mmi/classes/test'
-    folder_bbox = '../image/dataset_mmi/bbox/test'
-    folder_true = '../image/dataset_mmi/labels/test'
-    folder_three_pts = '../image/dataset_mmi/three_points/test'
+    folder_images = '../image/Cholect_dataset/images/test'
+    folder_points = '../image/cholect_annotation/points/test'
+    folder_labels = '../image/cholect_annotation/classes/test'
+    folder_bbox = '../image/cholect_annotation/bbox/test'
+    folder_true = '../image/Cholect_dataset/labels/test'
+    folder_three_pts = '../image/cholect_annotation/three_points/test'
 
     matching_image_paths, matching_bbox_paths, matching_pts_paths, matching_lbs_paths, matching_true_paths, matching_three_pts_paths = exctract_paths(folder_images, folder_bbox, folder_points, folder_labels, folder_true, folder_three_pts)
 
@@ -60,7 +60,7 @@ if __name__ == '__main__':
     option = 0
     if option == 0:
         # Use sam2 with mask
-        output_folder = '../image/dataset_mmi/IoU/iou_mask_bbox.csv'
+        output_folder = '../image/cholect_annotation/IoU/iou_mask_bbox.csv'
         all_results = []
         for box, lbs, image_path, true_contour in zip(matching_bbox_paths, matching_lbs_paths, matching_image_paths, matching_true_paths):
             print(f"Processing image: {image_path}")
@@ -69,7 +69,7 @@ if __name__ == '__main__':
             image = np.array(image.convert("RGB"))
             predictor.set_image(image)
 
-            bbox = load_boxes(box, image_width, image_height)
+            bbox = load_boxes(box, image_width, image_height, 0)
 
             pred_masks, scores, _ = predictor.predict(
                 point_coords=None,
@@ -79,8 +79,8 @@ if __name__ == '__main__':
             )
 
             # Open the true contour file and extract masks
-            true_masks = extract_true_mask(true_contour, image_width, image_height)
-            
+            true_masks = extract_true_mask_json(true_contour, image_width, image_height)
+
             # Convert masks to PyTorch tensors
             if pred_masks.shape[1] == 1:
                 pred_masks = pred_masks.squeeze(1)
@@ -129,7 +129,7 @@ if __name__ == '__main__':
             print(f"Processing image: {image_path}")
 
             # Load the points (coordinates)
-            points = load_points(pts_path, image_width, image_height) 
+            points = load_points(pts_path, image_width, image_height, 0) 
             input_point = np.array(points)
             predictor.set_image(image)
             
@@ -160,7 +160,7 @@ if __name__ == '__main__':
             pred_masks = np.stack(pred_masks)
 
             # Open the true contour file and extract masks
-            true_masks = extract_true_mask(true_contour, image_width, image_height)
+            true_masks = extract_true_mask_json(true_contour, image_width, image_height)
             
             # Convert masks to PyTorch tensors
             pred_mask_tensor = torch.tensor(pred_masks)
@@ -208,7 +208,7 @@ if __name__ == '__main__':
             print(f"Processing image: {image_path}")
 
             # Load the three points
-            points = load_three_points(pts_path, image_width, image_height) 
+            points = load_three_points(pts_path, image_width, image_height, 0) 
             input_point = np.array(points)
             predictor.set_image(image)
             
@@ -255,7 +255,7 @@ if __name__ == '__main__':
             pred_masks = np.stack(pred_masks)
 
             # Open the true contour file and extract masks
-            true_masks = extract_true_mask(true_contour, image_width, image_height)
+            true_masks = extract_true_mask_json(true_contour, image_width, image_height)
             
             # Convert masks to PyTorch tensors
             if pred_masks.shape[1] == 1:

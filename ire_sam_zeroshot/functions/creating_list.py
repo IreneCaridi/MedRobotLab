@@ -1,5 +1,5 @@
 import os
-import glob
+from glob import glob
 from PIL import Image
 import numpy as np
 
@@ -18,7 +18,7 @@ def get_base_filename(path):
     #return os.path.splitext(os.path.basename(path))[0]
     return path.split('/')[-1].split('.')[0]
 
-def exctract_paths(folder_images, folder_bbox, folder_points, folder_labels):
+def exctract_paths(folder_images, folder_bbox, folder_points, folder_labels, folder_true, folder_three_pts):
     """
     Extracts the paths of matching files from the specified folders.
     """
@@ -27,8 +27,9 @@ def exctract_paths(folder_images, folder_bbox, folder_points, folder_labels):
     bbox_paths = glob(os.path.join(folder_bbox, '*.txt'))
     pts_paths = glob(os.path.join(folder_points, '*.txt'))
     lbs_paths = glob(os.path.join(folder_labels, '*.txt'))
-    true_paths = glob(os.path.join(folder_true, '*.txt'))
+    true_paths = glob(os.path.join(folder_true, '*.json'))
     three_pts_paths = glob(os.path.join(folder_three_pts, '*.txt'))
+    print('Number of files in each folder:', len(image_paths), len(bbox_paths), len(pts_paths), len(lbs_paths), len(true_paths), len(three_pts_paths))
 
     # Get base filenames (without extensions) for matching
     image_names = {get_base_filename(path) for path in image_paths}
@@ -60,8 +61,9 @@ def exctract_paths(folder_images, folder_bbox, folder_points, folder_labels):
 
     return matching_image_paths, matching_bbox_paths, matching_pts_paths, matching_lbs_paths, matching_true_paths, matching_three_pts_paths
 
+
 # Functions to load bounding boxes
-def load_boxes(matching_bbox_paths, image_width, image_height):
+def load_boxes(matching_bbox_paths, image_width, image_height, norm):
     """
     Loads bounding boxes from text files, converts them from normalized
     coordinates to pixel coordinates based on the image size, and returns
@@ -81,17 +83,18 @@ def load_boxes(matching_bbox_paths, image_width, image_height):
             # Extract normalized coordinates from the file
             xmin, ymin, xmax, ymax = map(float, line.strip().split(','))
 
-            xmin = xmin*image_width
-            ymin = ymin*image_height
-            xmax = xmax*image_width
-            ymax = ymax*image_height
+            if norm == 1:
+                xmin = xmin*image_width
+                ymin = ymin*image_height
+                xmax = xmax*image_width
+                ymax = ymax*image_height
 
             # Add the bounding box to the list
             boxes.append([int(xmin), int(ymin), int(xmax), int(ymax)])
         boxes_array = np.array(boxes)
     return boxes_array
 
-def load_points(file_path, image_width, image_height):
+def load_points(file_path, image_width, image_height, norm):
     """
     Loads normalized point coordinates from a file, scales them according to the 
     specified image dimensions, and returns them as an array.
@@ -112,8 +115,9 @@ def load_points(file_path, image_width, image_height):
             # Extract normalized coordinates from the file
             x, y = map(float, line.strip().split(','))
 
-            x = x*image_width
-            y = y*image_height
+            if norm == 1:
+                x = x*image_width
+                y = y*image_height
 
 
             # Add the bounding box to the list
@@ -122,7 +126,7 @@ def load_points(file_path, image_width, image_height):
     return points_array
 
 
-def load_three_points(file_path, image_width, image_height):
+def load_three_points(file_path, image_width, image_height, norm):
     """
     Loads normalized point coordinates from a file, scales them according to the 
     specified image dimensions, and returns them as an array.
@@ -143,12 +147,13 @@ def load_three_points(file_path, image_width, image_height):
             # Extract normalized coordinates from the file
             x, y, x_min, y_min, x_max, y_max = map(float, line.strip().split(','))
 
-            x = x*image_width
-            y = y*image_height
-            x_min = x_min*image_width
-            y_min = y_min*image_height
-            x_max = x_max*image_width
-            y_max = y_max*image_height
+            if norm == 1:
+                x = x*image_width
+                y = y*image_height
+                x_min = x_min*image_width
+                y_min = y_min*image_height
+                x_max = x_max*image_width
+                y_max = y_max*image_height
 
 
             points.append([int(x), int(y)])

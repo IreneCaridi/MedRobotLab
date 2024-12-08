@@ -1,6 +1,6 @@
 import os
 import glob
-from functions.creating_point_bbox import process_contours
+from functions.creating_point_bbox import process_contours_json, process_contours
 import matplotlib
 matplotlib.use("tkagg")
 
@@ -9,12 +9,14 @@ parent_dir = os.path.dirname(current_dir)
 
 
 if __name__ == '__main__':
-    folder = '../image/dataset_mmi/labels/test'
+    folder = '../image/Cholect_dataset/labels/test'
 
-    mask_paths = glob.glob(os.path.join(folder, '*.txt'))
+    mask_paths = glob.glob(os.path.join(folder, '*.json'))
 
     for image_path in mask_paths:
         image_name = os.path.splitext(os.path.basename(image_path))[0]
 
-        process_contours(image_path, image_name)
+        process_contours_json(image_path, image_name)
+        print(f"Processed {image_name}.")
+
 
