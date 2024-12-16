@@ -337,6 +337,8 @@ class DistillatioModels(nn.Module):
         else:
             raise TypeError("teacher not recognised")
 
+        self.my_logger = info_log
+
         self.train_loader, self.val_loader = loaders
         if device == 'gpu':
             if torch.cuda.is_available():
