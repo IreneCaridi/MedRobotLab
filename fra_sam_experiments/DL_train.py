@@ -90,7 +90,7 @@ def main(args):
             student = UnetEncoder()
             # loading model = bla bla bla
         elif args.student == 'RepViT':
-            student = RepViT('m2', args.reshape_size, fuse=True)
+            student = RepViT(args.RepViT_arch, args.reshape_size, fuse=True)
         else:
             raise TypeError("Model name not recognised")
     else:
@@ -167,9 +167,10 @@ if __name__ == "__main__":
     # reshaping BOTH needed
     parser.add_argument('--reshape_mode', type=str, default='crop', choices=[None, 'crop', 'pad'], help=" how to handle resize")
     parser.add_argument('--reshape_size', type=int, default=512, help='the finel shape input to model')
+    parser.add_argument('--RepViT_arch', type=str, default='m1', help='use RepViT architecture')
 
     # loggers option
-    parser.add_argument('--wandb', type=str, default='MedRobLab', help='name of wandb profile (if None means not logging)')
+    parser.add_argument('--wandb', type=str, default=None, help='name of wandb profile (if None means not logging)')
 
     parser.add_argument('--epochs', type=int, required=True, help='number of epochs')
     parser.add_argument('--batch_size', type=int, required=True, help='batch size')
