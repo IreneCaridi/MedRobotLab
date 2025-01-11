@@ -398,6 +398,8 @@ class RepViT(nn.Module):
                  use_rpn=False, out_indices=['stem', 'stage0', 'stage1', 'final'], upsample_mode='bicubic'):
         super(RepViT, self).__init__()
         # setting of inverted residual blocks
+
+        self.name = 'RepViT'
         self.cfgs = self.arch_settings[arch]
         self.img_size = img_size
         self.fuse = fuse
@@ -447,6 +449,12 @@ class RepViT(nn.Module):
         )
 
     def load_from(self, path_to_weights):
+        """
+
+        args:
+            - path_to_weights: EdgeSAM weights ONLY
+
+        """
         state_dict = torch.load(path_to_weights, map_location='cpu')
         new_state_dict = dict()
         use_new_dict = False
@@ -539,12 +547,15 @@ class RepViTUP(nn.Module):
     def forward(self, x):
         return self.channel_mixer(self.token_mixer(x))
 
+
 class RepViTupCat(nn.Module):
-    def __init__(self, c):
+    def __init__(self, c, c_=None):
         super().__init__()
-        c_ = c//2
+        if not c_:
+            c_ = c//2
+
         self.up = RepViTUP(c, c_, 3, 2, True, True)
-        self.pw = nn.Conv2d(c, c_, 1)
+        self.pw = nn.Conv2d(c_ * 2, c_, 1)
 
     def forward(self, x):
         x, x_cat = x
@@ -553,26 +564,34 @@ class RepViTupCat(nn.Module):
         x = self.pw(x)
         return x
 
+
 class RepViTDecoder(nn.Module):
-    def __init__(self, n_classes, upsample_stem=True):
+    def __init__(self, n_classes, arch, upsample_stem=True):
         super().__init__()
 
-        self.stages = nn.ModuleList([RepViTBlock(128, 256, 128, 3, 1, True, True),
-                                     RepViTBlock(64, 128, 64, 3, 1, True, True),
-                                     RepViTBlock(32, 64, 32, 3, 1, True, True),
+        if arch == 'm2':
+            self.C = [256, 128, 64, 32]
+        elif arch == 'm1':
+            self.C = [192, 96, 48, 24]
+        else:
+            raise AttributeError('Not implemented')
+
+        self.stages = nn.ModuleList([RepViTBlock(self.C[1], self.C[0], self.C[1], 3, 1, True, True),
+                                     RepViTBlock(self.C[2], self.C[1], self.C[2], 3, 1, True, True),
+                                     RepViTBlock(self.C[3], self.C[2], self.C[3], 3, 1, True, True),
                                      RepViTBlock(8, 16, 8, 3, 1, True, True)])
 
-        self.ups = nn.ModuleList([RepViTupCat(256),
-                                  RepViTupCat(128),
-                                  RepViTupCat(64),
-                                  RepViTUP(32,8,3,2,True,True)])
+        self.ups = nn.ModuleList([RepViTupCat(256, self.C[1]),
+                                  RepViTupCat(self.C[1]),
+                                  RepViTupCat(self.C[2]),
+                                  RepViTUP(self.C[3], 8, 3, 2, True, True)])
 
         self.head = nn.Conv2d(8, n_classes, 1)
 
         if upsample_stem:
-            self.up_stem = RepViTUP(64,32,3,2,True,True)
+            self.up_stem = RepViTUP(self.C[2], self.C[3], 3, 2, True, True)
         else:
-            self.ups[2] = RepViTUP(64,32,3,2,True,True)
+            self.ups[2] = RepViTUP(self.C[2], self.C[3], 3, 2, True, True)
             self.up_stem = None
 
 
@@ -589,19 +608,25 @@ class RepViTDecoder(nn.Module):
         return self.head(x)
 
 
+
+
 class RepViTUnet(nn.Module):
     # use_rpn is == True to allow for decoder
-    def __init__(self, arch='m2', n_classes=4, img_size=1024, fuse=False, freeze=False,
+    def __init__(self, arch='m1', n_classes=8, img_size=1024, fuse=True, freeze=False,
                  use_rpn=True, out_indices=['stem', 'stage0', 'stage1', 'final'], upsample_mode='bicubic', upsample_stem=True):
         super().__init__()
 
+        self.name = 'RepViTUnet'
         self.encoder = RepViT(arch, img_size, fuse, freeze, use_rpn, out_indices, upsample_mode)
-        self.decoder = RepViTDecoder(n_classes, upsample_stem)
+        self.decoder = RepViTDecoder(n_classes, arch, upsample_stem)
 
     def forward(self, x):
         return self.decoder(self.encoder(x))
 
-#
+    def load_from(self, weights_edgeSAM):
+        self.encoder.load_from(weights_edgeSAM)
+
+
 # class RpnYolox(nn.Module):
 #     def __init__(self, input_shape):
 #         super().__init__()

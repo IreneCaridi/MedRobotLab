@@ -27,7 +27,7 @@ def check_load_model(model, backbone_weights):
 
         old = torch.load(backbone_weights)
         filtered_state_dict = {k: old.state_dict()[k] for k in old.state_dict() if k in model.state_dict()}
-        model.load_state_dict(filtered_state_dict, strict=False)
+        print(model.load_state_dict(filtered_state_dict, strict=False))
 
         return model
 
@@ -54,10 +54,10 @@ class ModelClass(nn.Module):
             --is_det: flag whether you are using a detection head
         """
 
-        self.freeze = freeze
-
         assert isinstance(info_log, logging.Logger), 'provided info_log is not a logger'
         self.my_logger = info_log
+
+        self.freeze = freeze
 
         if isinstance(model, nn.Module):
             self.model = model
@@ -101,6 +101,11 @@ class ModelClass(nn.Module):
             self.AMP = False
 
         self.is_det = is_det
+
+        total_params = sum(p.numel() for p in self.model.parameters())
+        self.my_logger.info(f"'{self.model.name}' - Total parameters: {total_params / 1e6:.2f}M")
+        if self.freeze:
+            self.my_logger.info('freezing backbone...')
 
     def train_one_epoch(self, epoch_index, tot_epochs):
         self.loss_fun.reset()
@@ -161,23 +166,19 @@ class ModelClass(nn.Module):
                 # calling callbacks
                 self.callbacks.on_train_batch_end(outputs.float(), labs, batch)
 
-            # updating pbar
-            # if self.metrics.num_classes != 2:
-            #     A = self.metrics.A.t_value_mean
-            #     P = self.metrics.P.t_value_mean
-            #     R = self.metrics.R.t_value_mean
-            #     AUC = self.metrics.AuC.t_value_mean
-            # else:
-            #     A = self.metrics.A.t_value_mean
-            #     P = self.metrics.P.t_value[1]
-            #     R = self.metrics.R.t_value[1]
-            #     AUC = self.metrics.AuC.t_value[1]
+                # updating pbar
+                A = self.metrics.A.t_value_mean
+                P = self.metrics.P.t_value_mean
+                R = self.metrics.R.t_value_mean
+                # AUC = self.metrics.AuC.t_value[1]
+                dice = self.metrics.Dice.t_value
 
-            # pbar_loader.set_description(f'Epoch {epoch_index}/{tot_epochs-1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
-            #                             f'train_loss: {last_loss:.4f}, A: {A :.2f}, P: {P :.2f}, R: {R :.2f}, AUC: {AUC :.2f}')
+            pbar_loader.set_description(
+                f'Epoch {epoch_index}/{tot_epochs - 1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
+                f'train_loss: {current_loss:.4f}, A: {A :.2f}, P: {P :.2f}, R: {R :.2f}, Dice: {dice: .2f}')
 
-            pbar_loader.set_description(f'Epoch {epoch_index}/{tot_epochs - 1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
-                                        f'train_loss: {current_loss:.4f}')
+            # pbar_loader.set_description(f'Epoch {epoch_index}/{tot_epochs - 1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
+        #                                 f'train_loss: {current_loss:.4f}')
             if self.device != "cpu":
                 torch.cuda.synchronize()
 
@@ -233,19 +234,15 @@ class ModelClass(nn.Module):
                 self.loggers.on_val_batch_end(outputs, labels, batch)
 
                 # # updating pbar
-                # if self.metrics.num_classes != 2:
-                #     A = self.metrics.A.v_value_mean
-                #     P = self.metrics.P.v_value_mean
-                #     R = self.metrics.R.v_value_mean
-                #     AUC = self.metrics.AuC.v_value_mean
-                # else:
-                #     A = self.metrics.A.v_value_mean
-                #     P = self.metrics.P.v_value[1]
-                #     R = self.metrics.R.v_value[1]
-                #     AUC = self.metrics.AuC.v_value[1]
-                # description = f'Validation: val_loss: {last_loss:.4f}, val_A: {A :.2f}, ' \
-                #               f'val_P: {P :.2f}, val_R: {R :.2f}, val_AUC: {AUC :.2f}'
-                description = f'Validation: val_loss: {current_loss:.4f}'
+                A = self.metrics.A.v_value_mean
+                P = self.metrics.P.v_value_mean
+                R = self.metrics.R.v_value_mean
+                # AUC = self.metrics.AuC.v_value[1]
+                dice = self.metrics.Dice.v_value
+                description = f'Validation: val_loss: {current_loss:.4f}, A: {A :.2f}, ' \
+                              f'P: {P :.2f}, R: {R :.2f}, Dice: {dice :.2f}'
+
+                # description = f'Validation: val_loss: {current_loss:.4f}'
                 pbar_loader.set_description(description)
 
         if outputs is not None:
@@ -304,7 +301,7 @@ class ModelClass(nn.Module):
     def check_freeze(self):
         if self.freeze:
             for name, param in self.model.named_parameters():
-                if any(layer_name in name for layer_name in self.freeze):
+                if 'encoder' in name:
                     param.requires_grad = False
                 else:
                     param.requires_grad = True
@@ -385,6 +382,8 @@ class DistillatioModels(nn.Module):
             self.AMP = False
 
         self.encoder_only_teacher = as_encoder
+        total_params = sum(p.numel() for p in self.student.parameters())
+        self.my_logger.info(f"'{self.student.name}' - Total parameters: {total_params / 1e6:.2f}M")
 
     def train_one_epoch(self, epoch_index, tot_epochs):
         self.loss_fun.reset()

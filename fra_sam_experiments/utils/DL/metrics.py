@@ -30,7 +30,7 @@ class BaseMetric(BaseCallback):
         if self.device == "cpu":
             output = output.to("cpu")
             target = target.to("cpu")
-        batch_value = self.metric(output, target)
+        _ = self.metric(output, target)
         self.t_value = self.metric.compute()  # value computed along every batch
         self.t_value_mean = self.t_value.mean()
 
@@ -41,7 +41,7 @@ class BaseMetric(BaseCallback):
         if self.device == "cpu":
             output = output.to("cpu")
             target = target.to("cpu")
-        batch_value = self.metric(output, target)
+        _ = self.metric(output, target)
         self.v_value = self.metric.compute()  # value computed along every batch
         self.v_value_mean = self.v_value.mean()
 
@@ -98,6 +98,20 @@ class Recall(BaseMetric):
                                                              top_k=top_k, average=None).to(self.device)
 
 
+class Dice(BaseMetric):
+    """
+    :param
+        --num_classes: number of classes
+        --device: device "cpu" or "gpu"
+        --top_k: Number of highest probability or logit score predictions considered to find the correct label.
+        --thresh: Threshold for transforming probability to binary {0,1} predictions (ONLY if binary)
+    """
+    def __init__(self, num_classes=2, device="gpu", top_k=1):
+        super().__init__(num_classes, device)
+
+        self.metric = torchmetrics.classification.Dice(num_classes=num_classes, top_k=top_k, ignore_index=0).to(self.device)
+
+
 class AUC(BaseMetric):
     """
     :param
@@ -113,20 +127,22 @@ class AUC(BaseMetric):
 
 
 class Metrics(BaseCallback):
-    def __init__(self, loss_fn, num_classes=2, device="cpu", top_k=1, thresh=0.5):
+    def __init__(self, loss_fn, num_classes=2, device="cpu", top_k=1, thresh=0.5, seg=False):
         """
 
             wrapper for metrics to be used in the model
 
         """
-
-        # self.A = Accuracy(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
-        # self.P = Precision(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
-        # self.R = Recall(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
-        # self.AuC = AUC(num_classes=num_classes, device=device, thresh=None)
-        # self.metrics = [self.A, self.P, self.R, self.AuC]
+        if seg:
+            self.A = Accuracy(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
+            self.P = Precision(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
+            self.R = Recall(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
+            # self.AuC = AUC(num_classes=num_classes, device=device, thresh=None)
+            self.Dice = Dice(num_classes=num_classes, device=device)
+            self.metrics = [self.A, self.P, self.R, self.Dice]
+        else:
+            self.metrics = []
         self.loss_fn = loss_fn
-        self.metrics = []
         self.dict = self.build_metrics_dict()
         self.num_classes = num_classes
 
@@ -136,15 +152,15 @@ class Metrics(BaseCallback):
 
     def on_train_end(self, num_batches=None):
         for k in self.loss_fn.running_dict.keys():
-            if k == 'dice':
-                self.dict["train_" + k] = [self.loss_fn.running_dict[k][i] / num_batches
-                                           for i in self.loss_fn.running_dict[k].shape[0]]
-            else:
-                self.dict["train_" + k] = [self.loss_fn.running_dict[k] / num_batches]  # all scalars
+            self.dict["train_" + k] = [self.loss_fn.running_dict[k] / num_batches]  # all scalars
 
         for obj in self.metrics:
             name = "train_" + obj.__class__.__name__
-            self.dict[name] = [x for x in obj.t_value.to("cpu").numpy().astype(np.float16)]
+            metric = obj.t_value.to("cpu").numpy().astype(np.float16)
+            if metric.ndim == 0:
+                self.dict[name] = [metric]
+            else:
+                self.dict[name] = [x for x in metric]
 
     def on_val_start(self):
         for obj in self.metrics:
@@ -152,15 +168,15 @@ class Metrics(BaseCallback):
 
     def on_val_end(self, num_batches=None, epoch=None):
         for k in self.loss_fn.running_dict.keys():
-            if k == 'dice':
-                self.dict["val_" + k] = [self.loss_fn.running_dict[k][i] / num_batches
-                                         for i in self.loss_fn.running_dict[k].shape[0]]
-            else:
-                self.dict["val_" + k] = [self.loss_fn.running_dict[k] / num_batches]  # all scalars
+            self.dict["val_" + k] = [self.loss_fn.running_dict[k] / num_batches]  # all scalars
 
         for obj in self.metrics:
             name = "val_" + obj.__class__.__name__
-            self.dict[name] = [x for x in obj.v_value.to("cpu").numpy().astype(np.float16)]
+            metric = obj.v_value.to("cpu").numpy().astype(np.float16)
+            if metric.ndim == 0:
+                self.dict[name] = [metric]
+            else:
+                self.dict[name] = [x for x in metric]
 
     def on_val_batch_end(self, output=None, target=None, batch=None):
         for obj in self.metrics:
@@ -175,6 +191,7 @@ class Metrics(BaseCallback):
         names = [obj.__class__.__name__ for obj in self.metrics]
         names += [k for k in self.loss_fn.running_dict.keys()]
         keys = ["train_"+name for name in names] + ["val_"+name for name in names]
+        # keys = ["train_" + name for name in names if 'loss' in name] + ["val_" + name for name in names]
 
         return {key: None for key in keys}
 
