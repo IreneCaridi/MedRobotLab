@@ -99,7 +99,7 @@ class Saver(BaseCallback):
         self.monitor = monitor
         self.mode = mode
         if mode == "min":
-            self.best_fitness = 1.1  # validation
+            self.best_fitness = 5.  # validation
         elif mode == "max":
             self.best_fitness = 0.0  # validation
         else:

@@ -199,7 +199,7 @@ def mask_list_to_array(mask_list, img_shape):
     Args:
         mask_list: List of tuples, where each tuple is (list of np.array polygons, class_id).
                    Each polygon is a numpy array of shape (num_points, 2).
-        img_shape: tuple with shape of image
+        img_shape: tuple with shape of image (H,W)
 
     Returns:
         mask: a np.array with integer masks of shape HxW (good for pytorch losses)
@@ -208,11 +208,12 @@ def mask_list_to_array(mask_list, img_shape):
     mask = np.zeros(img_shape, dtype=np.uint8)
 
     for class_idx, (polygons, class_id) in enumerate(mask_list):
-        for polygon in polygons:
 
-            mask = cv2.fillPoly(mask, [polygon.astype(np.int32)], color=class_id)
+        # for polygon in polygons:
+        if isinstance(polygons, np.ndarray):
+            mask = cv2.fillPoly(mask, [polygons.astype(np.int32)], color=class_id)
 
-    return mask.sum(-1)
+    return mask
 
 
 def bbox_from_poly(masks_batch, return_dict=False):

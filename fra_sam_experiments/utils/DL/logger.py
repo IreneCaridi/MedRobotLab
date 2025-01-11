@@ -3,8 +3,10 @@ import numpy as np
 from matplotlib import pyplot as plt
 import os
 import torch
+import math
 import torchmetrics
 import wandb
+from pathlib import Path
 
 from .callbacks import BaseCallback
 
@@ -14,9 +16,10 @@ class LogsHolder(BaseCallback):
         :param
             --metrics = metrics object
     """
-    def __init__(self, metrics, test=False, wandb=False):
+    def __init__(self, metrics, test=False, wandb=False, ignore_class: list = [0]):
         super().__init__()
         self.metrics = metrics
+        self.ignore_class = ignore_class
         self.dict = self.build_metrics_dict()
         self.test = test
         self.wandb = wandb
@@ -25,9 +28,10 @@ class LogsHolder(BaseCallback):
         d = {key: [] for key in self.metrics.dict}
         dummy = d.copy()
         for key in dummy:
-            if "loss" not in key:
+            if "loss" not in key and 'Dice' not in key:
                 for i in range(self.metrics.num_classes):
-                    d[key+f"_{i}"] = []
+                    if i not in self.ignore_class:
+                        d[key + f"_{i}"] = []
         return d
 
     def on_epoch_end(self, epoch=None):
@@ -37,9 +41,10 @@ class LogsHolder(BaseCallback):
                     self.dict[key].append(self.metrics.dict[key][0])
                 else:
                     for i in range(len(self.metrics.dict[key])):
-                        self.dict[key+f"_{i}"].append(self.metrics.dict[key][i])
+                        if i not in self.ignore_class:
+                            self.dict[key + f"_{i}"].append(self.metrics.dict[key][i])
                     flat = [item for item in self.metrics.dict[key]]
-                    self.dict[key].append(np.float16(sum(flat)/len(flat)))  # mean value
+                    self.dict[key].append(np.float16(sum(flat) / len(flat)))  # mean value
         else:
             for key in self.metrics.dict:
                 if 'train' not in key:
@@ -47,9 +52,9 @@ class LogsHolder(BaseCallback):
                         pass
                     else:
                         for i in range(len(self.metrics.dict[key])):
-                            self.dict[key+f"_{i}"].append(self.metrics.dict[key][i])
+                            self.dict[key + f"_{i}"].append(self.metrics.dict[key][i])
                         flat = [item for item in self.metrics.dict[key]]
-                        self.dict[key].append(np.float16(sum(flat)/len(flat)))  # mean value
+                        self.dict[key].append(np.float16(sum(flat) / len(flat)))  # mean value
         if self.wandb:
             dd = {k: self.dict[k][-1] for k in self.dict.keys()}
             dd['epoch'] = epoch
@@ -112,32 +117,54 @@ class SaveFigures(BaseCallback):
         self.save_metrics()
 
     def save_metrics(self):
-        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(20, 11))
+        fig, axes, names = self.get_fig_axs(figsize=(20, 11))
+        axes = [axes] if not isinstance(axes, (list, np.ndarray)) else axes.flatten()
 
-        self.plot_metric("val_loss", axes[0])
-        # self.plot_metric("Accuracy", axes[0, 1])
-        # self.plot_metric("Precision", axes[0, 2])
-        self.plot_metric("train_loss", axes[1])
-        # self.plot_metric("AUC", axes[1, 1])
-        # self.plot_metric("Recall", axes[1, 2])
+        best_epoch = self.get_best_epoch()
+
+        # handle the plotting with both the losses in one subplot
+        for i, n in enumerate(names):
+            self.plot_metric(n, axes[i], best_epoch)
 
         fig.tight_layout()
         plt.savefig(self.save_path / self.name, dpi=96)
         plt.close()
 
-    def plot_metric(self, metric, ax):
+    def get_fig_axs(self, figsize=(20, 11)):
+
+        df = pd.read_csv(self.save_path / 'results.csv')
+        metrics = [x.replace('val_', '') for x in df.keys() if 'val_' in x and not x[-1].isdigit()]
+        num_metrics = len(metrics)
+
+        # Calculate the number of columns and rows
+        cols = math.floor(math.sqrt(num_metrics) * 1.5)  # Increase columns for rectangle
+        rows = math.ceil(num_metrics / cols)  # Rows as a function of columns
+
+        f, axs = plt.subplots(rows, cols, figsize=figsize)
+
+        return f, axs, metrics
+
+    def plot_metric(self, metric, ax, best_epoch):
         if "loss" not in metric:
             for key in self.logs.dict:
-                if metric in key and "train_" not in key:
+                if metric in key and "train_" not in key and 'loss' not in key:
                     if key[-1].isdigit():
                         lab = key[-1]
                     else:
                         lab = "mean"
                     ax.plot(range(len(self.logs.dict[key])), self.logs.dict[key], label=lab)
-            ax.legend()
+
         else:
-            ax.plot(range(len(self.logs.dict[metric])), self.logs.dict[metric])
+            # for loss (train and val together)
+            for k in ['val_', 'train_']:
+                ax.plot(range(len(self.logs.dict[k + metric])), self.logs.dict[k + metric], label=k + metric)
+        ax.axvline(x=best_epoch, color='red', linestyle='--', linewidth=2, label=f'Best epoch: {best_epoch}')
         ax.set_title(metric)
+        ax.legend()
+
+    def get_best_epoch(self):
+        b = [int(str(Path(w).stem).replace('best_', '')) for w in os.listdir(self.save_path / 'weights') if 'best' in w]
+        return b[0]
 
 
 class LrLogger(BaseCallback):

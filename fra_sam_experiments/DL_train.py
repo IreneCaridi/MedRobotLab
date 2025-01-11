@@ -1,14 +1,15 @@
 import argparse
 import os
 
-import torch.nn as nn
+import torch
 from pathlib import Path
+
 
 import wandb
 
 from models import DistillatioModels, check_load_model, SAM2handler, ModelClass
-from models.common import Dummy, UnetEncoder
-from models.Rep_ViT import RepViT
+from models.common import Dummy, UnetEncoder, UNet0
+from models.Rep_ViT import RepViT, RepViTUnet
 from utils.DL.callbacks import Callbacks, EarlyStopping, Saver
 from utils.DL.loaders import load_all
 from utils.DL.optimizers import get_optimizer, scheduler
@@ -50,15 +51,27 @@ def main(args):
     device = args.device
     out_classes = args.n_class + 1  # +1 for bkg
 
+    if args.weighted_loss:
+        weights = [0.00024, 0.00662, 0.67449, 0.07547, 0.06557, 0.11787, 0.05362, 0.00608]
+        weights = torch.tensor(weights, dtype=torch.float32)
+
+        if torch.cuda.is_available() and args.device == 'gpu':
+            weights = weights.to('cuda:0')
+    else:
+        weights = None
+
     if args.as_encoder:
         enc_flag = True
+        use_label_flag = False
         loss_fn = MSELoss(reduction="mean")
     elif args.as_predictor:
         enc_flag = False
-        loss_fn = FullLossKD(lamda_dist=0.25, alpha=1, gamma=2, lambdas_focal=(0.5, 0.5), weights=None)
+        use_label_flag = True
+        loss_fn = FullLossKD(lamda_dist=0.25, alpha=1, gamma=2, lambdas_focal=(0.5, 0.5), weights=weights)
     elif args.only_supervised:
-        enc_flag = True
-        loss_fn = SemanticLosses(alpha=1, gamma=2, lambdas=(0.5, 0.5), weight=None)  # maybe consider weights...
+        enc_flag = False
+        use_label_flag = True
+        loss_fn = SemanticLosses(alpha=1, gamma=2, lambdas=(0.4, 0.6), weight=weights)  # maybe consider weights...
     else:
         raise AttributeError('ok it should not be possible to get there, you broke the parser lol')
 
@@ -79,7 +92,8 @@ def main(args):
 
     # loading dataset already as iterable torch loaders (train, val ,(optional) test)
     loaders = load_all(data_paths, args.reshape_mode, args.reshape_size, batch_size, test_flag=False,
-                       use_label=not enc_flag, n_workers=args.n_workers, pin_memory=args.pin_memory)
+                       use_label=use_label_flag, n_workers=args.n_workers, pin_memory=args.pin_memory,
+                       store_imgs=args.store_imgs)
 
     # model (ADJUST)
     if "." not in args.student:
@@ -91,14 +105,18 @@ def main(args):
             # loading model = bla bla bla
         elif args.student == 'RepViT':
             student = RepViT('m2', args.reshape_size, fuse=True)
+        elif args.student == 'RepViTUnet':
+            student = RepViTUnet('m1', out_classes, fuse=True)
+        elif args.student == 'Unet':
+            student = UNet0(out_classes)
         else:
             raise TypeError("Model name not recognised")
     else:
         # it is a weight
         student = args.student
 
-    # double-checking whether you parsed weights or model and accounting for transfer learning
-    student = check_load_model(student, args.backbone)
+        # double-checking whether you parsed weights or model and accounting for transfer learning
+        student = check_load_model(student, args.pre_weights)
 
     # initializing callbacks ( could be handled more concisely i guess...)
     stopper = EarlyStopping(patience=args.patience, monitor="val_loss", mode="min")
@@ -106,13 +124,7 @@ def main(args):
     callbacks = Callbacks([stopper, saver])
 
     # for encoder only it is just empty, ADJUST for decoder then
-    metrics = Metrics(loss_fn=loss_fn, num_classes=3, device=device, top_k=1, thresh=0.5)
-
-    # if args.weighted_loss:
-    # if args.cropped_seq or args.cropped_seq_raw:
-    #     weights = torch.tensor([0.62963445, 2.42849968], dtype=torch.float32)  # only m9
-    # else:
-    #     weights = None
+    metrics = Metrics(loss_fn=loss_fn, num_classes=out_classes, device=device, top_k=1, thresh=0.5, seg=use_label_flag)
 
     opt = get_optimizer(student, args.opt, args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
 
@@ -122,19 +134,16 @@ def main(args):
     # lr scheduler
     sched = scheduler(opt, args.sched, args.lrf, epochs)
 
-    # building loaders
-    # test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=False, collate_fn=padding_x)  # to pad
-    # val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size, shuffle=True, collate_fn=padding_x)  # to pad
-    # train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size, shuffle=True, collate_fn=padding_x)  # to pad
-
-    # loading sam as teacher (SAM2_image_predictor instance -- SAM2(nn.module) is in teacher.model)
-    teacher = SAM2handler(Path(parent_dir) / args.SAM2_weights, args.SAM2_configs, info_log=my_logger,
-                          as_encoder=enc_flag)
+    if not args.only_supervised:
+        # loading sam as teacher (SAM2_image_predictor instance -- SAM2(nn.module) is in teacher.model)
+        teacher = SAM2handler(Path(parent_dir) / args.SAM2_weights, args.SAM2_configs, info_log=my_logger,
+                              as_encoder=enc_flag)
 
     # building model
     if args.only_supervised:
         model = ModelClass(student, loaders, info_log=my_logger, loss_fn=loss_fn, device=device, AMP=args.AMP,
-                           optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched, freeze=None)
+                           optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
+                           freeze=args.freeze_backbone)
     else:
         model = DistillatioModels(student, teacher, loaders, info_log=my_logger, loss_fn=loss_fn, device=device, AMP=args.AMP,
                                   optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
@@ -159,13 +168,14 @@ if __name__ == "__main__":
     parser.add_argument('--student', type=str, required=True, help='name of model to train or path to weights to train')
     parser.add_argument('--SAM2_weights', type=str, default= r'sam2\checkpoints\sam2.1_hiera_large.pt', help='path to SAM2 weights (from sam2 repo folder)')
     parser.add_argument('--SAM2_configs', type=str, default="configs/sam2.1/sam2.1_hiera_l.yaml", help='path to SAM2 configs (from sam2 repo folder)')
-    parser.add_argument('--backbone', type=str, default=None, help='path to backbone weights, if present it ONLY loads weights for it')
+    parser.add_argument('--pre_weights', type=str, default=None, help='path to backbone weights, if present it ONLY loads weights for it')
+    parser.add_argument('--freeze_backbone', action='store_true', help='wether to freeze backbone')
 
     # classes (excluding bkg)
-    parser.add_argument('--n_class', type=int, default=3, help='the number of classes to segment (excluding bkg)')
+    parser.add_argument('--n_class', type=int, default=7, help='the number of classes to segment (excluding bkg)')
 
-    # reshaping BOTH needed
-    parser.add_argument('--reshape_mode', type=str, default='crop', choices=[None, 'crop', 'pad'], help=" how to handle resize")
+    # reshaping BOTH needed (when grid consider 8 elment per batch if size == 256)
+    parser.add_argument('--reshape_mode', type=str, default='crop', choices=[None, 'crop', 'pad', 'grid'], help=" how to handle resize")
     parser.add_argument('--reshape_size', type=int, default=512, help='the finel shape input to model')
 
     # loggers option
@@ -183,7 +193,7 @@ if __name__ == "__main__":
     parser.add_argument('--weight_decay', type=float, default=0.05, help='weight decay value')
     parser.add_argument('--lab_smooth', type=float, default=0, help='label smoothing value')
     parser.add_argument('--patience', type=int, default=30, help='number of epoch to wait for early stopping')
-    parser.add_argument('--device', type=str, default="cpu", choices=["cpu", "gpu"], help='device to which loading the model')
+    parser.add_argument('--device', type=str, default="gpu", choices=["cpu", "gpu"], help='device to which loading the model')
     parser.add_argument('--AMP', action="store_true", help='whether to use AMP')
     # probably not userfull
     parser.add_argument('--weighted_loss', action="store_true", help='whether to weight the loss and weight for classes')
@@ -204,6 +214,7 @@ if __name__ == "__main__":
     # loaders params
     parser.add_argument('--n_workers', type=int, default=0, help='number of workers for parallel dataloading ')
     parser.add_argument('--pin_memory', type=bool, default=True, help='whether to pin memory for more efficient passage to gpu')
+    parser.add_argument('--store_imgs', action='store_true', help='wether to store all data')
 
     args = parser.parse_args()
 

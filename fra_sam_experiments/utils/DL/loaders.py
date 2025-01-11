@@ -12,7 +12,8 @@ from ..mmi_dataset_utils import get_mask_from_txt
 
 from ..image_handling import center_crop_and_resize, pad_and_resize, mask_list_to_array
 from .. import my_logger
-from .collates import imgs_masks_polys
+from .collates import imgs_masks_polys, from_grid_crop
+from .augmentation import get_grid_patches
 
 
 class DummyLoader(torch.utils.data.Dataset):
@@ -71,7 +72,7 @@ class LoaderFromPath:
             - use_label: whether to load also labels
             - load_imgs: if True it directly loads images to RAM, else it stores paths-to-images
         """
-        accepted_reshape_types = [None, 'crop', 'pad']
+        accepted_reshape_types = [None, 'crop', 'pad', 'grid']
         assert reshape_mode in accepted_reshape_types, f'{reshape_mode} not valid, chose from {accepted_reshape_types}'
         self.reshape_mode = reshape_mode
         self.reshape_size = reshaped_size
@@ -103,7 +104,7 @@ class LoaderFromPath:
                 if self.store_imgs:  # loads all dataset to ram
                     img = np.array(Image.open(self.img_path / folder / img_n).convert('RGB'))
                     if self.lab_suffix:
-                        lab, poly = self.load_masks_labels(folder, Path(img_n).with_suffix(self.lab_suffix), img.shape)
+                        lab, poly = self.load_masks_labels(folder, Path(img_n).with_suffix(self.lab_suffix), img.shape[:2])
                         imgs[folder].append((self.reshape_and_scale(img), (lab, poly)))
                     else:
                         imgs[folder].append(self.reshape_and_scale(img))
@@ -125,16 +126,16 @@ class LoaderFromPath:
 
     def load_masks_labels(self, folder, lab_name, img_shape):
         # masks are a np.array with integer coded masks (fine for torch)
-
+        lab_name = str(lab_name)
         if '.json' in lab_name:
             poly = get_mask_from_json(self.lab_path / folder / lab_name)
             mask = mask_list_to_array(poly, img_shape)
-            mask = self.reshape_and_scale(mask)
+            mask = self.reshape_masks(mask)
             return mask, poly
         elif '.txt' in lab_name:
             poly = get_mask_from_txt(self.lab_path / folder / lab_name, return_dict=False)
             mask = mask_list_to_array(poly, img_shape)
-            mask = self.reshape_and_scale(mask)
+            mask = self.reshape_masks(mask)
             return mask, poly
         else:
             raise TypeError(f'{self.lab_suffix} labels are not accepted... ')
@@ -144,8 +145,20 @@ class LoaderFromPath:
             return pad_and_resize(img / 255, self.reshape_size)
         elif self.reshape_mode == 'crop':
             return center_crop_and_resize(img / 255, self.reshape_size)
+        elif self.reshape_mode == 'grid':
+            return get_grid_patches(img / 255, self.reshape_size)
         else:
             return img / 255
+
+    def reshape_masks(self, y):
+        if self.reshape_mode == 'pad':
+            return pad_and_resize(y, self.reshape_size)
+        elif self.reshape_mode == 'crop':
+            return center_crop_and_resize(y, self.reshape_size)
+        elif self.reshape_mode == 'grid':
+            return get_grid_patches(y, self.reshape_size)
+        else:
+            return y
 
 
 class LoaderFromData(torch.utils.data.Dataset):
@@ -161,7 +174,7 @@ class LoaderFromData(torch.utils.data.Dataset):
         """
         super().__init__()
 
-        accepted_reshape_types = [None, 'crop', 'pad']
+        accepted_reshape_types = [None, 'crop', 'pad', 'grid']
         assert reshape_mode in accepted_reshape_types, f'{reshape_mode} not valid, chose from {accepted_reshape_types}'
         self.reshape_mode = reshape_mode
         self.reshape_size = reshaped_size
@@ -182,7 +195,6 @@ class LoaderFromData(torch.utils.data.Dataset):
         else:
             self.already_loaded = False  # I have paths
 
-
         self.augmentation = augmentation
 
     def __len__(self):
@@ -192,11 +204,20 @@ class LoaderFromData(torch.utils.data.Dataset):
         if self.with_labels:
             if self.already_loaded:
                 x, (y, p) = self.data[idx]  # imgs, labs, polys
+                return self.transform(x, [y, p])
             else:
                 x_p, y_p = self.data[idx]
                 x = self.reshape_and_scale(np.array(Image.open(x_p).convert('RGB')))
-                y, p = self.load_masks_labels(y_p, x.shape)
-            return self.transform(x, [y, p])
+                if self.reshape_mode == 'grid':
+                    out = []
+                    y, p = self.load_masks_labels(y_p, (480, 854))
+                    for crop, crop_m in zip(x, y):
+                        # if np.max(crop_m.ravel()) != 0:
+                        out.append(self.transform(crop, [crop_m, p]))
+                    return out
+                else:
+                    y, p = self.load_masks_labels(y_p, x.shape[:2])
+                    return self.transform(x, [y, p])
         else:
             if self.already_loaded:  # check if paths or images are given
                 x = self.data[idx]
@@ -218,28 +239,41 @@ class LoaderFromData(torch.utils.data.Dataset):
             return pad_and_resize(img / 255, self.reshape_size)
         elif self.reshape_mode == 'crop':
             return center_crop_and_resize(img / 255, self.reshape_size)
+        elif self.reshape_mode == 'grid':
+            return get_grid_patches(img / 255, self.reshape_size)
         else:
             return img / 255
+
+    def reshape_masks(self, y):
+        if self.reshape_mode == 'pad':
+            return pad_and_resize(y, self.reshape_size)
+        elif self.reshape_mode == 'crop':
+            return center_crop_and_resize(y, self.reshape_size)
+        elif self.reshape_mode == 'grid':
+            return get_grid_patches(y, self.reshape_size)
+        else:
+            return y
 
     def load_masks_labels(self, lab_path, img_shape):
         # masks are a np.array with integer coded masks (fine for torch)
 
+        lab_path = str(lab_path)
         if '.json' in lab_path:
             poly = get_mask_from_json(lab_path)
             mask = mask_list_to_array(poly, img_shape)
-            mask = self.reshape_and_scale(mask)
+            mask = self.reshape_masks(mask)
             return mask, poly
         elif '.txt' in lab_path:
             poly = get_mask_from_txt(lab_path, return_dict=False)
             mask = mask_list_to_array(poly, img_shape)
-            mask = self.reshape_and_scale(mask)
+            mask = self.reshape_masks(mask)
             return mask, poly
         else:
             raise TypeError(f'{self.lab_suffix} labels are not accepted... ')
 
 
 def load_all(img_paths: list, reshape_mode=None, reshaped_size=1024, batch_size=4, test_flag=False, use_label=False,
-             n_workers=7, pin_memory=True):
+             n_workers=7, pin_memory=True, store_imgs=False):
     """
         loads all data in img_paths and returns the dataloaders for train, val and eventually test
 
@@ -256,7 +290,7 @@ def load_all(img_paths: list, reshape_mode=None, reshaped_size=1024, batch_size=
             - train_loader, val_loader, (optional) test_loader : torch iterable dataloaders
     """
 
-    accepted_reshape_types = [None, 'crop', 'pad']
+    accepted_reshape_types = [None, 'crop', 'pad', 'grid']
     assert reshape_mode in accepted_reshape_types, f'{reshape_mode} not valid, chose from {accepted_reshape_types}'
 
     train = []
@@ -265,13 +299,15 @@ def load_all(img_paths: list, reshape_mode=None, reshaped_size=1024, batch_size=
 
     for p in img_paths:
         # loading from all paths and splitting
-        loader = LoaderFromPath(p, reshape_mode, reshaped_size, test_flag, use_label)
+        loader = LoaderFromPath(p, reshape_mode, reshaped_size, test_flag, use_label, store_imgs=store_imgs)
         train += loader.train
         val += loader.val
         test += loader.test
 
-    if use_label:
+    if use_label and reshape_mode != 'grid':
         collate_fun = imgs_masks_polys
+    elif reshape_mode == 'grid':
+        collate_fun = from_grid_crop
     else:
         collate_fun = None
 

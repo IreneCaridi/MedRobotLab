@@ -33,3 +33,30 @@ def square_crop(image: np.ndarray, crop_size: int, center: tuple = None):
     crop = image[y - dx:y + dx, x - dx:x + dx]
     return crop, (x, y)
 
+
+def get_grid_patches(image, patch_size):
+    h, w = image.shape[0:2]
+    crops = []
+
+    pad_h = (patch_size - (h % patch_size)) % patch_size
+    pad_w = (patch_size - (w % patch_size)) % patch_size
+
+    if len(image.shape) == 3:
+        padded_image = np.pad(image, ((0, pad_h), (0, pad_w), (0, 0)), mode='constant', constant_values=0)
+    else:
+        padded_image = np.pad(image, ((0, pad_h), (0, pad_w)), mode='constant', constant_values=0)
+
+    padded_h, padded_w = padded_image.shape[0:2]
+
+    for y in range(0, padded_h, patch_size):
+        for x in range(0, padded_w, patch_size):
+            if len(image.shape) == 3:
+                crop = padded_image[y:y + patch_size, x:x + patch_size, :]
+            else:
+                crop = padded_image[y:y + patch_size, x:x + patch_size]
+            crops.append(crop)
+
+    return crops
+
+
+
