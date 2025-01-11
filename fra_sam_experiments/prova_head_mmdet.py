@@ -84,7 +84,7 @@ m.backbone.load_from(path_to_weights)
 img = np.array(Image.open(r'C:\Users\franc\OneDrive - Politecnico di Milano\dataset_mmi\images\train\image_1.png').convert('RGB'))
 x = torch.from_numpy(img).to(torch.float32).permute(2, 0, 1).unsqueeze(0)
 
-#
+
 # x = torch.rand((1, 3, 1024, 1024), dtype=torch.float32)
 
 x_enc, x_raw, x_pred = m(x)

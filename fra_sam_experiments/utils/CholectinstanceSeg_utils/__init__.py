@@ -6,13 +6,14 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import numpy as np
 
-map_dict = {'grasper': 1,
-            'snare': 2,
-            'irrigator': 3,
-            'clipper': 4,
-            'scissors': 5,
-            'bipolar': 6,
-            'hook': 7}
+
+map_dict = {'grasper': 0,
+            'snare': 1,
+            'irrigator': 2,
+            'clipper': 3,
+            'scissors': 4,
+            'bipolar': 5,
+            'hook': 6}
 
 
 def get_mask_from_json(json_path):
@@ -22,8 +23,8 @@ def get_mask_from_json(json_path):
     masks = []
     for m in range(len(data['shapes'])):
         polygon_coords = np.array(data['shapes'][m]['points'])
-        lab = map_dict[data['shapes'][m]['label']]
-        masks.append((polygon_coords, lab))
+        lab = data['shapes'][m]['label']
+        masks.append((polygon_coords, map_dict[lab]))
 
     return masks  # to be consistent with format I'm using to handle masks for images (1 => instrument)
 

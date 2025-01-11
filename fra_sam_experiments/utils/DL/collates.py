@@ -6,6 +6,11 @@ def keep_unchanged(batch):
     return batch
 
 
+def edgesam_collate(batch):
+    x = [i for i, _ in batch]
+    y = [j for _, j in batch]
+    return x, y
+
 def imgs_masks_polys(batch):
 
     x, y, p = zip(*batch)

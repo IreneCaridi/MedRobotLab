@@ -192,29 +192,35 @@ def plot_mask_over_image(image, masks: list, ax):
             ax.add_patch(polygon)
 
 
-def mask_list_to_array(mask_list, img_shape):
+def mask_list_to_array(mask_list, img_shape, instances=False):
     """
         Convert the mask-polygons list of an image into a np.array with masks plotted
 
     Args:
         mask_list: List of tuples, where each tuple is (list of np.array polygons, class_id).
                    Each polygon is a numpy array of shape (num_points, 2).
-        img_shape: tuple with shape of image (H,W)
+        img_shape: tuple with shape of image
+        instances: whether to return a list of binary mask
 
     Returns:
         mask: a np.array with integer masks of shape HxW (good for pytorch losses)
     """
 
-    mask = np.zeros(img_shape, dtype=np.uint8)
+    if not instances:
+        mask = np.zeros(img_shape, dtype=np.uint8)
+        for class_idx, (polygon, class_id) in enumerate(mask_list):
+            # for polygon in polygons:
 
-    for class_idx, (polygons, class_id) in enumerate(mask_list):
+            mask = cv2.fillPoly(mask, [polygon.astype(np.int32)], color=class_id)
 
-        # for polygon in polygons:
-        if isinstance(polygons, np.ndarray):
-            mask = cv2.fillPoly(mask, [polygons.astype(np.int32)], color=class_id)
-
-    return mask
-
+        return mask.sum(-1)
+    else:
+        mask = []
+        for class_idx, (polygon, _) in enumerate(mask_list):
+            # for polygon in polygons:
+            m = cv2.fillPoly(np.zeros(img_shape, dtype=np.uint8), [polygon.astype(np.int32)], color=1)
+            mask.append(m.sum(-1))
+        return np.array(mask)
 
 def bbox_from_poly(masks_batch, return_dict=False):
     """
@@ -227,30 +233,117 @@ def bbox_from_poly(masks_batch, return_dict=False):
                        where bbox is a tuple containing xyxy coord of bbox
                        (NOTE it is different from polys, here 1 tuple x box)
     Returns:
-        bboxes_list:
+        bboxes_list: xyxy format
     """
 
     bboxes_list = []
-    for masks_instance in masks_batch:
-        bbox_dict = {}
-        for masks, class_id in masks_instance:
-            bboxes = []
+    # sorting classes for consistency
+    if return_dict:
+        for masks_instance in masks_batch:
+            bbox_dict = {}
+            for masks, class_id in masks_instance:
+                bboxes = []
 
-            for polygon in masks:
-
+                # for polygon in masks:
+                polygon = masks
                 min_x, min_y = np.min(polygon, axis=0)
                 max_x, max_y = np.max(polygon, axis=0)
 
-                bboxes.append((min_x, min_y, max_x, max_y))
-                bbox_dict[class_id] = bboxes
+                bboxes.append([min_x, min_y, max_x, max_y])
+                if class_id not in bbox_dict.keys():
+                    bbox_dict[class_id] = bboxes
+                else:
+                    bbox_dict[class_id].append(bboxes)
 
-        # sorting classes for consistency
-        if return_dict:
-            bboxes_list.append({k: bbox_dict[k] for k in sorted(bbox_dict.keys())})
-        else:
-            bb = []
-            for k in sorted(bbox_dict.keys()):
-                bb += [(x, k) for x in bbox_dict[k]]
-            bboxes_list.append(bb)
-    return bboxes_list
+                bboxes_list.append({k: bbox_dict[k] for k in sorted(bbox_dict.keys())})
+                return bboxes_list
+    else:
+        for masks_instance in masks_batch:
+            for masks, class_id in masks_instance:
+                bboxes = []
 
+                # for polygon in masks:
+                polygon = masks
+                min_x, min_y = np.min(polygon, axis=0)
+                max_x, max_y = np.max(polygon, axis=0)
+
+                bboxes_list.append(([min_x, min_y, max_x, max_y], class_id))
+        #
+        # bb = []
+        # for k in sorted(bbox_dict.keys()):
+        #     bb += [(x, k) for x in bbox_dict[k]]
+        # bboxes_list.append(bb)
+        return bboxes_list
+
+
+def get_polygon_centroid(polys_batch):
+    """
+    Compute the centroid of a polygon given its vertices.
+
+    Args:
+        polys_batch: A list of polys and id as always
+
+    Returns:
+        a list of np.array centroids with id
+    """
+
+    centroids_list = []
+    for poly, class_id in polys_batch:
+
+        x = poly[:, 0]
+        y = poly[:, 1]
+
+        # Shifted coordinates for (i+1) with wrap-around
+        x_next = np.roll(x, -1)
+        y_next = np.roll(y, -1)
+
+        # Compute area (A)
+        area = 0.5 * np.sum(x * y_next - x_next * y)
+
+        if np.isclose(area, 0):
+            area = 1e-6
+
+        # Compute centroid coordinates
+        C_x = (1 / (6 * area)) * np.sum((x + x_next) * (x * y_next - x_next * y))
+        C_y = (1 / (6 * area)) * np.sum((y + y_next) * (x * y_next - x_next * y))
+
+        centroids_list.append(([C_x, C_y], class_id)) # HxW
+
+    return centroids_list
+
+
+def get_three_points(poly_batch, percentage=0.1):
+    """
+    Calculate two points along the diagonal of the mask at a given percentage distance
+    from the centroid of the polygon.
+
+    Args:
+        poly_batch: list of polygons with ids.
+        percentage (float): The percentage distance from the centroid (default is 0.1 for 10%).
+
+    Returns:
+        list: The two points along the diagonal at the specified distance and the centroid.
+    """
+    # Compute the centroid of the polygon
+    centroids_list = get_polygon_centroid(poly_batch)
+
+    # Find the bounding box of the polygon (min and max of x and y coordinates)
+    bboxes_list = bbox_from_poly([poly_batch])
+
+    three_points_list = []
+    for (c, i), (bb, _) in zip(centroids_list, bboxes_list):
+        # Vector from the centroid to the top-left corner (p1) and bottom-right corner (p2)
+        c = np.array(c)
+        p1 = np.array(bb[:2])
+        p2 = np.array(bb[3:])
+
+        vector_to_p1 = p1 - c
+        vector_to_p2 = p2 - c
+
+        # Calculate the points at the specified percentage distance from the centroid
+        point1 = c + percentage * vector_to_p1
+        point2 = c + percentage * vector_to_p2
+
+        three_points_list.append(([c.tolist(), point1.tolist(), point2.tolist()], i))  # Nx2 (batched with ids)
+
+    return three_points_list
