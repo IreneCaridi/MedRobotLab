@@ -19,7 +19,7 @@ class_colormap = ListedColormap(colors)
 
 
 class ClosenessChecker:
-    def __init__(self, th = 20):   # th in pixels
+    def __init__(self, th=50):   # th in pixels
         self.old_bboxs = []
         self.th = th
 
@@ -34,6 +34,7 @@ class ClosenessChecker:
                 # if it similar to at least one, then it is not new
                 return False
         return True
+
 
     def check(self, current_bboxs):
         current_bboxs = [b for b, _ in current_bboxs]
@@ -61,7 +62,7 @@ class ClosenessChecker:
     #     #         return False
 
     def __call__(self, current_bbox):
-        self.check(current_bbox)
+        return self.check(current_bbox)
 
 
 checker = ClosenessChecker()
@@ -104,20 +105,23 @@ for x, y, bboxs in tqdm(data):  # Iterate through all slices
     ax.axis('off')  # Remove axes
     plt.tight_layout()
 
-    fig.canvas.draw()
-    frame = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)  # Updated to use buffer_rgba
-    frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (4,))  # Convert to proper shape (RGBA)
-    frame = frame[:, :, :3]  # Drop the alpha channel to convert RGBA to RGB
-
-    # QUESTA LA STO PROVANDO
     if i == 0 or (i > 0 and checker(bboxs)):
         for box, _ in bboxs:
-            rect = patches.Rectangle((box[0], box[1]), box[3] - box[0], box[3] - box[1],
+            rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1],
                                      linewidth=2, edgecolor='red', facecolor='none')
             ax.add_patch(rect)
-        for _ in range(25):  # 25 frame uguali (1 sec)
+
+            fig.canvas.draw()
+            frame = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)  # Updated to use buffer_rgba
+            frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (4,))  # Convert to proper shape (RGBA)
+            frame = frame[:, :, :3]  # Drop the alpha channel to convert RGBA to RGB
+        for _ in range(50):  # 25 frame uguali (2 sec)
             frames.append(frame)
     else:
+        fig.canvas.draw()
+        frame = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)  # Updated to use buffer_rgba
+        frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (4,))  # Convert to proper shape (RGBA)
+        frame = frame[:, :, :3]  # Drop the alpha channel to convert RGBA to RGB
         frames.append(frame)
 
     checker.update(bboxs)
