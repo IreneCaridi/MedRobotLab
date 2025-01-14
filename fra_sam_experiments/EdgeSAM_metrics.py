@@ -55,7 +55,9 @@ def compute_iou(x, y):
 
 # src = Path(r'C:\Users\franc\Documents\MedRobotLab\dataset\Cholect_dataset\images\test')
 
-src = Path(r'C:\Users\franc\Documents\MedRobotLab\dataset\Cholect_dataset\to_use\images')
+src = Path(r'C:\Users\franc\Documents\MedRobotLab\dataset\Cholect_dataset\to_use_brutti\images')
+
+names = [Path(i).stem for i in os.listdir(src)]
 
 path_to_weights = r'C:\Users\franc\Documents\EdgeSAM\weights\edge_sam_3x.pth'
 
@@ -74,7 +76,7 @@ os.makedirs(dst, exist_ok=True)
 
 dataset = EdgeSAMLoader(src, lab_type, device=device)
 
-loader = torch.utils.data.DataLoader(dataset, batch_size=3, shuffle=False, num_workers=0, collate_fn=edgesam_collate)
+loader = torch.utils.data.DataLoader(dataset, batch_size=8, shuffle=False, num_workers=0, collate_fn=edgesam_collate)
 
 IoU_dict = {i: [] for i in range(1,8,1)}
 
@@ -86,11 +88,13 @@ labs = [i for _, i in y]
 prompts = [i['prompt_init'] for i in x]
 images = [i['original_image'] for i in x]
 
-dst = Path(r'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\images') / f'palle'
+dst = Path(r'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\images') / f'brutti'
 os.makedirs(dst, exist_ok=True)
 
-for ms, n, p, im, ls in zip(batched_output, ['seg8k_video12_015810', 't50_VID10_000660', 't50_VID74_001380'],
-                        prompts, images, labs):
+for ms, n, p, im, ls in zip(batched_output, names, prompts, images, labs):
+    if isinstance(p[0], float):
+        p = [p]
+
     # p = np.reshape(p, (-1, 2))
     # m_np = np.zeros((480, 854)).astype(np.uint8)
     # for m in ms['masks']:
@@ -109,7 +113,7 @@ for ms, n, p, im, ls in zip(batched_output, ['seg8k_video12_015810', 't50_VID10_
         overlay_pred = np.zeros((*m.shape, 3))
         overlay_pred[m == 1, :] = color_map[l]
         # overlay_pred[overlay_pred >= 1] = 1  # same color
-        ax.imshow(overlay_pred, alpha=0.3)  # Red overlay for the mask
+        ax.imshow(overlay_pred, alpha=0.2)  # Red overlay for the mask
 
     # ax.scatter(p[:,0], p[:,1], c=[[0, 1, 0]], s=100)
     ax.axis('off')  # Remove axes
