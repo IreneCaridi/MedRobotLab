@@ -3,6 +3,9 @@ import cv2
 from matplotlib.patches import Polygon
 import matplotlib.pyplot as plt
 import torch
+from shapely.geometry import Polygon, LineString
+from shapely.geometry import MultiLineString
+from shapely.ops import voronoi_diagram
 
 
 def int2color(integer, max_value=10):
@@ -328,14 +331,16 @@ def get_three_points(poly_batch, percentage=0.1):
     centroids_list = get_polygon_centroid(poly_batch)
 
     # Find the bounding box of the polygon (min and max of x and y coordinates)
-    bboxes_list = bbox_from_poly([poly_batch])
+    # bboxes_list = bbox_from_poly([poly_batch])
 
     three_points_list = []
-    for (c, i), (bb, _) in zip(centroids_list, bboxes_list):
+    for (c, i), (poly, _) in zip(centroids_list, poly_batch):
         # Vector from the centroid to the top-left corner (p1) and bottom-right corner (p2)
         c = np.array(c)
-        p1 = np.array(bb[:2])
-        p2 = np.array(bb[3:])
+        p1 = poly[np.argmax(np.sum(poly, axis=1))]
+        p2 = poly[np.argmin(np.sum(poly, axis=1))]
+        # p1 = np.array(bb[:2])
+        # p2 = np.array(bb[3:])
 
         vector_to_p1 = p1 - c
         vector_to_p2 = p2 - c
@@ -347,3 +352,4 @@ def get_three_points(poly_batch, percentage=0.1):
         three_points_list.append(([c.tolist(), point1.tolist(), point2.tolist()], i))  # Nx2 (batched with ids)
 
     return three_points_list
+

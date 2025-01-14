@@ -7,13 +7,13 @@ from PIL import Image
 import numpy as np
 
 
-map_dict = {'grasper': 0,
-            'snare': 1,
-            'irrigator': 2,
-            'clipper': 3,
-            'scissors': 4,
-            'bipolar': 5,
-            'hook': 6}
+map_dict = {'grasper': 1,
+            'snare': 2,
+            'irrigator': 3,
+            'clipper': 4,
+            'scissors': 5,
+            'bipolar': 6,
+            'hook': 7}
 
 
 def get_mask_from_json(json_path):

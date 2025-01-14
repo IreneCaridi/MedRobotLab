@@ -8,6 +8,26 @@ from pathlib import Path
 
 random_state()
 
+# JUST TO HAVE IDEA (its defined in .CholectinstanceSeg_utils.__init__
+# map_dict = {'grasper': 1,
+#             'snare': 2,
+#             'irrigator': 3,
+#             'clipper': 4,
+#             'scissors': 5,
+#             'bipolar': 6,
+#             'hook': 7}
+
+color_map = {1: [0,0,255],
+             2: [255,255,255], # nero perchè tanto non c'è nel test set lul
+             3: [255,0,0],
+             4: [0,255,255],
+             5: [255,255,0],
+             6: [255,0,255],
+             7: [0,255,0]}
+
+color_map = {k: np.array(color_map[k])/255 for k in color_map}
+
+
 def show_mask(mask, ax, random_color=False, borders = True):
     """
     inputs:

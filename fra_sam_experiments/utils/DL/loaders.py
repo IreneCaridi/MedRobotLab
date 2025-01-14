@@ -336,6 +336,9 @@ from edge_sam.utils.transforms import ResizeLongestSide
 class EdgeSAMLoader(torch.utils.data.Dataset):
     def __init__(self, src, lab_type='bbox', device='cpu'):
         super().__init__()
+
+        assert lab_type in ['bbox', 'centroid', 'three_points']
+
         self.src = Path(src)
         self.src_lab =Path(str(self.src).replace('images', 'labels'))
         self.lab_type = lab_type
@@ -362,10 +365,14 @@ class EdgeSAMLoader(torch.utils.data.Dataset):
                 if self.lab_type=='bbox':
                     bbox = bbox_from_poly([lab])
                     xyxy = torch.tensor([b for b, _ in bbox])
+                    # print(xyxy.shape)
+                    # print(xyxy.squeeze().numpy().tolist())
 
                     input_dict = {'image': self.prepare_image(img),
                                   'boxes': self.transform.apply_boxes_torch(xyxy, img.shape[:2]),
-                                  'original_size': img.shape[:2]}
+                                  'original_size': img.shape[:2],
+                                  'prompt_init': xyxy.squeeze().numpy().tolist(),
+                                  'original_image': img}
 
                 elif self.lab_type=='centroid':
                     centroids_list = get_polygon_centroid(lab)
@@ -374,7 +381,9 @@ class EdgeSAMLoader(torch.utils.data.Dataset):
                     input_dict = {'image': self.prepare_image(img),
                                   'point_coords': self.transform.apply_coords_torch(centroids, img.shape[:2]),
                                   'point_labels': torch.ones((centroids.shape[0], 1)),
-                                  'original_size': img.shape[:2]}
+                                  'original_size': img.shape[:2],
+                                  'prompt_init': centroids.numpy(),
+                                  'original_image': img}
 
                 elif self.lab_type=='three_points':
                     three_points_list = get_three_points(lab, 0.3)
@@ -382,7 +391,9 @@ class EdgeSAMLoader(torch.utils.data.Dataset):
                     input_dict = {'image': self.prepare_image(img),
                                  'point_coords': self.transform.apply_coords_torch(points, img.shape[:2]),
                                  'point_labels': torch.ones((points.shape[:2])),
-                                 'original_size': img.shape[:2]}
+                                 'original_size': img.shape[:2],
+                                  'prompt_init': points.numpy(),
+                                  'original_image': img}
 
                 else:
                     raise NotImplementedError
