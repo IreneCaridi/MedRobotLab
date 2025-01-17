@@ -239,5 +239,18 @@ class UnetUpBlock(nn.Module):
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
 
+class UnetUpNoCat(nn.Module):
+    """ 2x up-sampling"""
+
+    def __init__(self, c1, c2, dropout_p):
+        super().__init__()
+        self.up = nn.ConvTranspose2d(c1, c1, kernel_size=2, stride=2)
+        self.conv = nn.Sequential(nn.Conv2d(c1, c2, 1),
+                                  UnetBlock(c2, c2, dropout_p))
+
+    def forward(self, x):
+        x = self.up(x)
+        return self.conv(x)
+
 
 

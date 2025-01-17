@@ -215,12 +215,18 @@ def mask_list_to_array(mask_list, img_shape, instances=False):
             # for polygon in polygons:
 
             mask = cv2.fillPoly(mask, [polygon.astype(np.int32)], color=class_id)
-        return mask.sum(-1)
+
+        # return mask.sum(-1)   Don't know why it was like that
+
+        # plt.imshow(mask)  # debug line
+        # plt.show()
+        return mask
     else:
         mask = []
         for i, (polygon, _) in enumerate(mask_list):
             # for polygon in polygons:
             m = cv2.fillPoly(np.zeros(img_shape, dtype=np.uint8), [polygon.astype(np.int32)], color=1)
+
             mask.append(m.sum(-1))
         return np.array(mask)
 

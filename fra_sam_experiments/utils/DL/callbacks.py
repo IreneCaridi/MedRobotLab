@@ -123,14 +123,14 @@ class Saver(BaseCallback):
             pass
 
     def on_end(self):
-        torch.save(self.model, self.save_path / f"weights/last.pt")
+        torch.save(self.model.state_dict(), self.save_path / f"weights/last.pt")
         my_logger.info(f"model saved to {self.save_path}")
 
     def save(self, fitness, epoch, name="best"):
         self.best_fitness = fitness
         if os.path.isfile(self.save_path / "weights" / f"{name}_{self.best_epoch}.pt"):
             os.remove(self.save_path / "weights" / f"{name}_{self.best_epoch}.pt")
-        torch.save(self.model, self.save_path / "weights" / f"{name}_{epoch}.pt")
+        torch.save(self.model.state_dict(), self.save_path / "weights" / f"{name}_{epoch}.pt")
         my_logger.info("saved best")
         self.best_epoch = epoch
 

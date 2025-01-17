@@ -356,9 +356,9 @@ class EdgeSAMLoader(torch.utils.data.Dataset):
 
     def load_data(self):
         data = []
-        for i in  os.listdir(self.src):
+        for i in  sorted(os.listdir(self.src)):
             img = np.array(Image.open(self.src / i).convert('RGB'))
-            lab = get_mask_from_json(self.src_lab / i.replace('.png', '.json'))
+            lab = get_mask_from_json(self.src_lab / i.replace(str(Path(i).suffix), '.json'))
             mask = mask_list_to_array(lab, img.shape, True)
             labs = [l for _, l in lab]
             if lab:
@@ -372,7 +372,9 @@ class EdgeSAMLoader(torch.utils.data.Dataset):
                                   'boxes': self.transform.apply_boxes_torch(xyxy, img.shape[:2]),
                                   'original_size': img.shape[:2],
                                   'prompt_init': xyxy.squeeze().numpy().tolist(),
-                                  'original_image': img}
+                                  'original_image': img,
+                                  'image_name': i
+                                  }
 
                 elif self.lab_type=='centroid':
                     centroids_list = get_polygon_centroid(lab)
@@ -383,7 +385,9 @@ class EdgeSAMLoader(torch.utils.data.Dataset):
                                   'point_labels': torch.ones((centroids.shape[0], 1)),
                                   'original_size': img.shape[:2],
                                   'prompt_init': centroids.numpy(),
-                                  'original_image': img}
+                                  'original_image': img,
+                                  'image_name': i
+                                  }
 
                 elif self.lab_type=='three_points':
                     three_points_list = get_three_points(lab, 0.3)
@@ -393,7 +397,9 @@ class EdgeSAMLoader(torch.utils.data.Dataset):
                                  'point_labels': torch.ones((points.shape[:2])),
                                  'original_size': img.shape[:2],
                                   'prompt_init': points.numpy(),
-                                  'original_image': img}
+                                  'original_image': img,
+                                  'image_name': i
+                                  }
 
                 else:
                     raise NotImplementedError

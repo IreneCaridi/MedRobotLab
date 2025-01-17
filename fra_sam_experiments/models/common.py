@@ -4,7 +4,7 @@ import torch.nn as nn
 # import torchvision.transforms as transforms
 
 from .models_blocks import CNeXtBlock, CNeXtStem, CNeXtDownSample, ResBlock, ConvNormAct, ResBlockDP, TransformerBlock, \
-                           SPPF, C3, UnetBlock, UnetDown, UnetUpBlock
+                           SPPF, C3, UnetBlock, UnetDown, UnetUpBlock, UnetUpNoCat
 from .utility_blocks import SelfAttentionModule, PatchMerging, PatchExpanding, LayerNorm, SelfAttentionModuleFC, SelfAttentionModuleLin
 
 
@@ -1145,6 +1145,48 @@ class UnetDecoder0(nn.Module):
         x = self.up4(x, x0)     # -> 128x128x32
         out = self.out_conv(x)  # -> 128x128xN
         return out
+
+
+class UnetDecoderRepViT(nn.Module):
+    def __init__(self, arch='m1', n_classes=8, upsample_stem=True):
+        super().__init__()
+
+        self.upsample_stem = upsample_stem
+
+        if arch == 'm2':
+            self.ch_dims = [32, 64 ,128, 256]
+        elif arch == 'm1':
+            self.ch_dims = [24, 48, 96, 256]
+        else:
+            raise AttributeError('Not implemented')
+        self.n_classes = n_classes
+        assert (len(self.ch_dims) == 4)
+
+        self.up1 = UnetUpBlock(
+            self.ch_dims[3], self.ch_dims[2], dropout_p=0.0)
+        self.up2 = UnetUpBlock(
+            self.ch_dims[2], self.ch_dims[1], dropout_p=0.0)
+        if upsample_stem:
+            self.up_stem = UnetUpNoCat(self.ch_dims[1], self.ch_dims[0], dropout_p=0.0)
+            self.up3 = UnetUpBlock(
+                self.ch_dims[1], self.ch_dims[0], dropout_p=0.0)
+        else:
+            self.up3 = UnetUpNoCat(self.ch_dims[1], self.ch_dims[0], dropout_p=0.0)
+
+        self.up4 = UnetUpNoCat(self.ch_dims[0], 16, dropout_p=0.0)
+
+        self.out_conv = nn.Conv2d(16, self.n_classes, 1, 1)
+
+    def forward(self, features):
+        x_stem, x0, x1, x_f = features
+
+        x = self.up1(x_f, x1)
+        x = self.up2(x, x0)
+        x = self.up3(x, self.up_stem(x_stem)) if self.upsample_stem else self.up3(x)
+        x = self.up4(x)
+        out = self.out_conv(x)
+        return out
+
 
 
 class UNet0(nn.Module):

@@ -4,7 +4,7 @@ from torch import dtype
 import numpy as np
 
 from models.common import UNet
-from models.Rep_ViT import RepViT, RepViTBlock, RepViTUnet
+from models.Rep_ViT import RepViT, RepViTBlock, RepViTEncDec
 
 from mmdet.models.dense_heads import YOLOXHead
 from mmdet.models.necks import FPN

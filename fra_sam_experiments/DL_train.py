@@ -9,7 +9,7 @@ import wandb
 
 from models import DistillatioModels, check_load_model, SAM2handler, ModelClass
 from models.common import Dummy, UnetEncoder, UNet0
-from models.Rep_ViT import RepViT, RepViTUnet
+from models.Rep_ViT import RepViT, RepViTEncDec, RepViTUnet
 from utils.DL.callbacks import Callbacks, EarlyStopping, Saver
 from utils.DL.loaders import load_all
 from utils.DL.optimizers import get_optimizer, scheduler
@@ -42,7 +42,9 @@ def main(args):
     name = args.name
 
     # creating saving location
-    p = Path(folder) / 'train'
+    p = Path('runs') / 'train'
+    if folder:
+        p = p / folder
     os.makedirs(p, exist_ok=True)
     save_path = increment_path(p, name)
     name = save_path.stem
@@ -71,7 +73,7 @@ def main(args):
     elif args.only_supervised:
         enc_flag = False
         use_label_flag = True
-        loss_fn = SemanticLosses(alpha=1, gamma=2, lambdas=(0.4, 0.6), weight=weights)  # maybe consider weights...
+        loss_fn = SemanticLosses(alpha=1, gamma=2, lambdas=(0.5, 0.5), weight=weights)  # maybe consider weights...
     else:
         raise AttributeError('ok it should not be possible to get there, you broke the parser lol')
 
@@ -104,19 +106,21 @@ def main(args):
             student = UnetEncoder()
             # loading model = bla bla bla
         elif args.student == 'RepViT':
-            student = RepViT('m2', args.reshape_size, fuse=True)
-        elif args.student == 'RepViTUnet':
-            student = RepViTUnet('m1', out_classes, fuse=True)
+            student = RepViT(args.arch, args.reshape_size, fuse=True)
+        elif args.student == 'RepViTEncDec':
+            student = RepViTEncDec(args.arch, out_classes, fuse=True)
         elif args.student == 'Unet':
             student = UNet0(out_classes)
+        elif args.student == 'RepViTUnet':
+            student = RepViTUnet(args.arch, out_classes, fuse=True)
         else:
             raise TypeError("Model name not recognised")
     else:
         # it is a weight
         student = args.student
 
-        # double-checking whether you parsed weights or model and accounting for transfer learning
-        student = check_load_model(student, args.pre_weights)
+    # double-checking whether you parsed weights or model and accounting for transfer learning
+    student = check_load_model(student, args.pre_weights, my_logger)
 
     # initializing callbacks ( could be handled more concisely i guess...)
     stopper = EarlyStopping(patience=args.patience, monitor="val_loss", mode="min")
@@ -171,19 +175,22 @@ if __name__ == "__main__":
     parser.add_argument('--pre_weights', type=str, default=None, help='path to backbone weights, if present it ONLY loads weights for it')
     parser.add_argument('--freeze_backbone', action='store_true', help='wether to freeze backbone')
 
+    # RepViT ONLY!!!!!!!!!!!!!!!!
+    parser.add_argument('--arch', type=str, default='m1', help='the architecture type of RepViT')
+
     # classes (excluding bkg)
     parser.add_argument('--n_class', type=int, default=7, help='the number of classes to segment (excluding bkg)')
 
     # reshaping BOTH needed (when grid consider 8 elment per batch if size == 256)
     parser.add_argument('--reshape_mode', type=str, default='crop', choices=[None, 'crop', 'pad', 'grid'], help=" how to handle resize")
-    parser.add_argument('--reshape_size', type=int, default=512, help='the finel shape input to model')
+    parser.add_argument('--reshape_size', type=int, default=1024, help='the finel shape input to model')
 
     # loggers option
-    parser.add_argument('--wandb', type=str, default='MedRobLab', help='name of wandb profile (if None means not logging)')
+    parser.add_argument('--wandb', type=str, default=None, help='name of wandb profile (if None means not logging)')
 
     parser.add_argument('--epochs', type=int, required=True, help='number of epochs')
     parser.add_argument('--batch_size', type=int, required=True, help='batch size')
-    parser.add_argument('--folder', type=str, default="runs", help='name of folder to which saving results')
+    parser.add_argument('--folder', type=str, default=None, help='name of folder to which saving results inside runs/train')
     parser.add_argument('--name', type=str, default="exp", help='name of experiment folder inside folder')
     parser.add_argument('--opt', type=str, default="AdamW", choices=["SGD", "Adam", "AdamW"], help='name of optimizer to use')
     parser.add_argument('--sched', type=str, default=None, choices=["linear", "cos_lr"], help="name of the lr scheduler")

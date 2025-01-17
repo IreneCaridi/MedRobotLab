@@ -40,7 +40,7 @@ def linear_warmup(warmup_epochs, y1=1e-4, y2=1.0):
 
 def scheduler(opt, name, lrf, epochs, warmup: int = None):
     if not warmup:
-        warmup_epochs = epochs // 10
+        warmup_epochs = epochs // 15
     else:
         warmup_epochs = warmup
     warmup_scheduler = linear_warmup(warmup_epochs)

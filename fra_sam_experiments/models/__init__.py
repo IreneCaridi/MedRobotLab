@@ -12,7 +12,7 @@ import logging
 TQDM_BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'
 
 
-def check_load_model(model, backbone_weights):
+def check_load_model(model, backbone_weights, info_logger):
     if not backbone_weights:
         if isinstance(model, nn.Module):
             return model
@@ -25,9 +25,19 @@ def check_load_model(model, backbone_weights):
 
         assert isinstance(model, nn.Module)  # check that the model is something to load weights to
 
-        old = torch.load(backbone_weights)
-        filtered_state_dict = {k: old.state_dict()[k] for k in old.state_dict() if k in model.state_dict()}
-        print(model.load_state_dict(filtered_state_dict, strict=False))
+        info_logger.info(f'loading weights from {backbone_weights}')
+        old = torch.load(backbone_weights, map_location=torch.device('cpu'))
+
+        new_state_dict = {k: model.state_dict()[k] for k in model.state_dict()}
+        for k in old.state_dict():
+            if k in new_state_dict:  # to load normally I'd say...
+                new_state_dict[k] = old.state_dict()[k]
+            elif'encoder.'+k in new_state_dict:  # to load after pre distillation from sam
+                new_state_dict['encoder.'+k] = old.state_dict()[k]
+            else:
+                continue
+
+        info_logger.info(model.load_state_dict(new_state_dict, strict=False))
 
         return model
 

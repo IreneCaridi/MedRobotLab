@@ -9,6 +9,8 @@ import torch.nn.functional as F
 from timm.models.vision_transformer import trunc_normal_
 from timm.models.layers import SqueezeExcite
 
+from .common import UnetDecoderRepViT
+
 # from mmdet.models.dense_heads import YOLOXHead
 # from mmdet.models.necks import FPN
 # from mmdet.utils import (ConfigType, OptConfigType)
@@ -610,6 +612,25 @@ class RepViTDecoder(nn.Module):
 
 
 
+class RepViTEncDec(nn.Module):
+    # use_rpn is == True to allow for decoder
+    def __init__(self, arch='m1', n_classes=8, img_size=1024, fuse=True, freeze=False,
+                 use_rpn=True, out_indices=['stem', 'stage0', 'stage1', 'final'], upsample_mode='bicubic', upsample_stem=True):
+        super().__init__()
+
+        self.name = 'RepViT_enc_dec'
+        self.encoder = RepViT(arch, img_size, fuse, freeze, use_rpn, out_indices, upsample_mode)
+        self.decoder = RepViTDecoder(n_classes, arch, upsample_stem)
+
+    def forward(self, x):
+        return self.decoder(self.encoder(x))
+
+    def load_from(self, weights_edgeSAM):
+        # only for edge_sam - like weights
+        self.encoder.load_from(weights_edgeSAM)
+
+
+
 class RepViTUnet(nn.Module):
     # use_rpn is == True to allow for decoder
     def __init__(self, arch='m1', n_classes=8, img_size=1024, fuse=True, freeze=False,
@@ -618,12 +639,13 @@ class RepViTUnet(nn.Module):
 
         self.name = 'RepViTUnet'
         self.encoder = RepViT(arch, img_size, fuse, freeze, use_rpn, out_indices, upsample_mode)
-        self.decoder = RepViTDecoder(n_classes, arch, upsample_stem)
+        self.decoder = UnetDecoderRepViT(arch, n_classes, upsample_stem)
 
     def forward(self, x):
         return self.decoder(self.encoder(x))
 
     def load_from(self, weights_edgeSAM):
+        # only for edge_sam - like weights
         self.encoder.load_from(weights_edgeSAM)
 
 
