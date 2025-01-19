@@ -95,13 +95,13 @@ for x, y, bboxs in tqdm(data):  # Iterate through all slices
 
     fig, ax = plt.subplots(1, 1, figsize=(19.2, 10.8), dpi=100)
 
-    # Overlay preparation
-    overlay_pred = np.zeros((*y.shape, 3))
-    overlay_pred[:, :, 0] = y  # Red channel for the mask
-    overlay_pred[overlay_pred >= 1] = 1  # same color
-    # Plot the original slice with overlay
+    # # Overlay
+    # overlay_pred = np.zeros((*y.shape, 3))
+    # overlay_pred[:, :, 0] = y  # Red channel for the mask
+    # overlay_pred[overlay_pred >= 1] = 1  # same color
+    # ax.imshow(overlay_pred, cmap='Reds', alpha=0.4)  # Red overlay for the mask
+
     ax.imshow(x)  # Grayscale background
-    ax.imshow(overlay_pred, cmap='Reds', alpha=0.4)  # Red overlay for the mask
     ax.axis('off')  # Remove axes
     plt.tight_layout()
 
@@ -130,7 +130,7 @@ for x, y, bboxs in tqdm(data):  # Iterate through all slices
 
 # Finalize and release the video writer
 # video_writer.release()
-imageio.mimwrite(f'fra_sam_experiments/data/videos/{"prova_con_box"}.mp4', frames, fps=fps, codec='libx264')
+imageio.mimwrite(f'fra_sam_experiments/data/videos/{"prova_con_box_senza_gt"}.mp4', frames, fps=fps, codec='libx264')
 
 print("Video saved")
 
