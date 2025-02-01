@@ -43,6 +43,8 @@ class LogsHolder(BaseCallback):
                     for i in range(len(self.metrics.dict[key])):
                         if i not in self.ignore_class:
                             self.dict[key + f"_{i}"].append(self.metrics.dict[key][i])
+                    # the mean value is calculated as a 'macro' avg. of all classes, that's because I'm just saving the
+                    # per-class values in the metrics dict
                     flat = [item for item in self.metrics.dict[key]]
                     self.dict[key].append(np.float16(sum(flat) / len(flat)))  # mean value
         else:
@@ -133,7 +135,7 @@ class SaveFigures(BaseCallback):
     def get_fig_axs(self, figsize=(20, 11)):
 
         df = pd.read_csv(self.save_path / 'results.csv')
-        metrics = [x.replace('val_', '') for x in df.keys() if 'val_' in x and not x[-1].isdigit()]
+        metrics = [x.replace('val_', '') for x in df.keys() if 'val_' in x and not (x[-1].isdigit() and x[-2] == '_' )]
         num_metrics = len(metrics)
 
         # Calculate the number of columns and rows
@@ -146,13 +148,19 @@ class SaveFigures(BaseCallback):
 
     def plot_metric(self, metric, ax, best_epoch):
         if "loss" not in metric:
-            for key in self.logs.dict:
-                if metric in key and "train_" not in key and 'loss' not in key:
-                    if key[-1].isdigit():
-                        lab = key[-1]
-                    else:
-                        lab = "mean"
-                    ax.plot(range(len(self.logs.dict[key])), self.logs.dict[key], label=lab)
+            # for key in self.logs.dict:
+            #     if 'train_' not in key and 'loss' not in key:
+            #         if metric is key.replace('val_', ''):
+            #             if key[-1].isdigit():
+            #                 lab = key[-1]
+            #             else:
+            #                 lab = "mean"
+            #             ax.plot(range(len(self.logs.dict[key])), self.logs.dict[key], label=lab)
+            for n in range(1,self.logs.metrics.num_classes,1):
+                k = 'val_'+metric+f'_{n}'
+                if k in self.logs.dict.keys():
+                    ax.plot(range(len(self.logs.dict[k])), self.logs.dict[k], label=n)
+            ax.plot(range(len(self.logs.dict['val_'+metric])), self.logs.dict['val_'+metric], label='mean')
 
         else:
             # for loss (train and val together)

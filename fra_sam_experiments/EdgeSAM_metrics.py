@@ -11,7 +11,7 @@ import numpy as np
 from tqdm import tqdm
 import pandas as pd
 
-from utils.DL.loaders import EdgeSAMLoader
+from utils.edgesam.loaders import EdgeSAMLoader
 from utils.DL.collates import edgesam_collate
 from utils.plot import color_map
 
@@ -63,28 +63,35 @@ src2 = Path(r'C:\Users\franc\Documents\MedRobotLab\dataset\video_ppt\VID12_seg8k
 frames = []
 dst = Path(r'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\videos')
 os.makedirs(dst, exist_ok=True)
+
+sam_checkpoint = r"C:\Users\franc\Documents\MedRobotLab\EdgeSAM\weights\edge_sam_3x.pth"
+model_type = "edge_sam"
+
+device = "cpu"
+
+sam = sam_model_registry[model_type](checkpoint=sam_checkpoint, use_rpn=True)
+sam.to(device=device)
+
+# new_dict = {k: sam.state_dict()[k] for k in sam.state_dict().keys()}
+# distilled_w = r'C:\Users\franc\Documents\MedRobotLab\fra_sam_experiments\data\weights_distill\RepViT_m1\weights\best_40.pt'
+# distilled_w = torch.load(distilled_w, map_location=device)
+# for k in distilled_w.state_dict().keys():
+#     new_dict['image_encoder.' + k] = distilled_w.state_dict()[k]
+#
+# print(sam.load_state_dict(new_dict))
+
+map_dict = {'grasper': 1,
+            'snare': 2,
+            'irrigator': 3,
+            'clipper': 4,
+            'scissors': 5,
+            'bipolar': 6,
+            'hook': 7}
+
+inverse_map = {map_dict[k]: k for k in map_dict.keys()}
+
 for src in [src1, src2]:
     names = [Path(i).stem for i in os.listdir(src)]
-
-    path_to_weights = r'C:\Users\franc\Documents\EdgeSAM\weights\edge_sam_3x.pth'
-
-    sam_checkpoint = r"C:\Users\franc\Documents\MedRobotLab\EdgeSAM\weights\edge_sam_3x.pth"
-    model_type = "edge_sam"
-
-    device = "cpu"
-
-    sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-    sam.to(device=device)
-
-    map_dict = {'grasper': 1,
-                'snare': 2,
-                'irrigator': 3,
-                'clipper': 4,
-                'scissors': 5,
-                'bipolar': 6,
-                'hook': 7}
-
-    inverse_map = {map_dict[k]: k for k in map_dict.keys()}
 
     for lab_type in ['bbox']:
         print(f'doing: {lab_type}')
@@ -176,7 +183,7 @@ for src in [src1, src2]:
             # image = Image.fromarray(m_np)
             # image.save(dst / f'{n}_mask.png')
 fps = 25
-imageio.mimwrite(dst / f'VID12_seg8k.mp4', frames, fps=fps, codec='libx264')
+imageio.mimwrite(dst / f'VID12_seg8k_pus.mp4', frames, fps=fps, codec='libx264')
 
 print("Video saved")
 

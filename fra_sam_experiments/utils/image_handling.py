@@ -231,12 +231,12 @@ def mask_list_to_array(mask_list, img_shape, instances=False):
         return np.array(mask)
 
 
-def bbox_from_poly(masks_batch, return_dict=False):
+def bbox_from_poly(polys, return_dict: bool = False):
     """
     Retrieves bounding boxes for each give polygonals.
 
     args:
-        - masks_batch: list of masks polygons lists (masks polygons in same format as above [[(polys, id)...]...] )
+        - polys: list of masks polygons lists (masks polygons in same format as above [[(polys, id)...]...] )
         - return_dict: if True it returns a list of dicts (1 per img) where each key is a class containing list of top_left
                        and bottom_right corners of bboxes. Else it returns a list like [[(bbox, id)...]...] )
                        where bbox is a tuple containing xyxy coord of bbox
@@ -246,15 +246,14 @@ def bbox_from_poly(masks_batch, return_dict=False):
     """
 
     bboxes_list = []
-    # sorting classes for consistency
+
     if return_dict:
-        for masks_instance in masks_batch:
+        for poly in polys:
             bbox_dict = {}
-            for masks, class_id in masks_instance:
+            for polygon, class_id in poly:
                 bboxes = []
 
                 # for polygon in masks:
-                polygon = masks
                 min_x, min_y = np.min(polygon, axis=0)
                 max_x, max_y = np.max(polygon, axis=0)
 
@@ -267,17 +266,14 @@ def bbox_from_poly(masks_batch, return_dict=False):
                 bboxes_list.append({k: bbox_dict[k] for k in sorted(bbox_dict.keys())})
                 return bboxes_list
     else:
-        for masks_instance in masks_batch:
-            for masks, class_id in masks_instance:
-                bboxes = []
+        for poly in polys:
+            for polygon, class_id in poly:
 
-                # for polygon in masks:
-                polygon = masks
                 min_x, min_y = np.min(polygon, axis=0)
                 max_x, max_y = np.max(polygon, axis=0)
 
-                bboxes_list.append(([min_x, min_y, max_x, max_y], class_id))
-        #
+                bboxes_list.append(([int(min_x), int(min_y), int(max_x), int(max_y)], class_id))  # xyxy
+
         # bb = []
         # for k in sorted(bbox_dict.keys()):
         #     bb += [(x, k) for x in bbox_dict[k]]
@@ -359,3 +355,58 @@ def get_three_points(poly_batch, percentage=0.1):
 
     return three_points_list
 
+
+def adjust_bboxes(bboxes, original_shape: tuple, final_shape: int = 1024):
+    """
+
+    Parameters:
+    - bboxes: List of bounding boxes (xyxy) same format [([x1, y1, x2, y2], class_id), ...], in absolute coordinates.
+    - original_shape: Original shape of the image.
+    - final_shape: Final shape of the image.
+
+    Returns:
+    - List of transformed bounding boxes in same format as above
+    """
+
+    # Compute crop size (smallest side)
+    orig_height, orig_width = original_shape
+    S = min(orig_width, orig_height)
+
+    # Compute cropping region
+    if orig_width > orig_height:  # Landscape
+        x_min_crop = (orig_width - orig_height) / 2
+        y_min_crop = 0
+    else:  # Portrait
+        x_min_crop = 0
+        y_min_crop = (orig_height - orig_width) / 2
+
+    # Scaling factor for resizing
+    scale_factor = final_shape / S
+
+    adjusted_bboxes = []
+    for box, class_id in bboxes:
+        # Adjust for cropping
+        x1_new = box[0] - x_min_crop
+        x2_new = box[2] - x_min_crop
+        y1_new = box[1] - y_min_crop
+        y2_new = box[3] - y_min_crop
+
+        # Ensure bbox is within crop region
+        if x2_new < 0 or y2_new < 0 or x1_new > S or y1_new > S:
+            continue  # Skip bboxes that are completely outside the cropped area
+
+        # Clip to be within the cropped square
+        x1_new = np.clip(x1_new, 0, S)
+        x2_new = np.clip(x2_new, 0, S)
+        y1_new = np.clip(y1_new, 0, S)
+        y2_new = np.clip(y2_new, 0, S)
+
+        # Apply scaling
+        x1_resized = x1_new * scale_factor
+        x2_resized = x2_new * scale_factor
+        y1_resized = y1_new * scale_factor
+        y2_resized = y2_new * scale_factor
+
+        adjusted_bboxes.append(([x1_resized, y1_resized, x2_resized, y2_resized], class_id))
+
+    return adjusted_bboxes

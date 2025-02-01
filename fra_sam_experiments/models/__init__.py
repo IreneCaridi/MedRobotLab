@@ -110,7 +110,10 @@ class ModelClass(nn.Module):
         else:
             self.AMP = False
 
-        self.is_det = is_det
+        if is_det:
+            self.task = 'bbox'
+        else:
+            self.task = 'seg'
 
         total_params = sum(p.numel() for p in self.model.parameters())
         self.my_logger.info(f"'{self.model.name}' - Total parameters: {total_params / 1e6:.2f}M")
@@ -130,39 +133,21 @@ class ModelClass(nn.Module):
             torch.cuda.empty_cache()  # Clear GPU memory
             gpu_used = torch.cuda.max_memory_allocated() / (1024 ** 3)
 
-            inputs, labs, _ = data   # 3rd unpacked value are polys (I don't wont to change the collate and loaders...)
-            inputs = inputs.to(self.device)
-            if not self.is_det:
-                labs = labs.to(self.device)
-            else:
-                labs.bboxes = labs.bboxes.to(self.device)
-                labs.labels = labs.labels.to(self.device)
+            inputs, labs, poly_box = self.unpack_data(data)
 
             self.opt.zero_grad()
 
             if self.AMP:
                 with autocast():
-                    if not self.is_det:
-                        outputs = self.model(inputs)
-                        loss = self.loss_fun(outputs, labs)
-                    else:
-                        x_enc, x_raw, x_pred = self.model(inputs)
-                        loss_dict = self.model.get_loss(x_raw, labs)
-                        # {'loss_cls': tensor(1.3182, grad_fn=<DivBackward0>), 'loss_bbox': tensor(5., grad_fn=<DivBackward0>), 'loss_obj': tensor(29777.5078, grad_fn=<DivBackward0>)}
-                        # here understund how to get the loss (probabl an obj that has the model inside and actually
-                        # computes the loss calling inside .get_loss of the model
+
+                    outputs, loss = self.compute_loss(inputs, labs, poly_box)
 
                     self.scaler.scale(loss).backward()
                     self.scaler.step(self.opt)
                     self.scaler.update()
             else:
-                if not self.is_det:
-                    outputs = self.model(inputs)
-                    loss = self.loss_fun(outputs, labs)
-                else:
-                    x_enc, x_raw, x_pred = self.model(inputs)
-                    loss_dict = self.model.get_loss(x_raw, labs)
-                    #  here understand how to get the loss
+                outputs, loss = self.compute_loss(inputs, labs, poly_box)
+
                 loss.backward()
                 self.opt.step()
 
@@ -171,24 +156,17 @@ class ModelClass(nn.Module):
             current_loss = self.loss_fun.get_current_value(batch)
 
             with torch.no_grad():
+                if self.task == 'bbox':
+                    labs = poly_box
+
+
                 # computing training metrics
-                self.metrics.on_train_batch_end(outputs.float(), labs, batch)
-                # calling callbacks
-                self.callbacks.on_train_batch_end(outputs.float(), labs, batch)
+                self.metrics.on_train_batch_end(outputs, labs, batch)
+                # # calling callbacks
+                # self.callbacks.on_train_batch_end(outputs, labs, batch)
 
-                # updating pbar
-                A = self.metrics.A.t_value_mean
-                P = self.metrics.P.t_value_mean
-                R = self.metrics.R.t_value_mean
-                # AUC = self.metrics.AuC.t_value[1]
-                dice = self.metrics.Dice.t_value
+                self.update_pbar(pbar_loader, current_loss, epoch_index, tot_epochs, gpu_used, mode='train')
 
-            pbar_loader.set_description(
-                f'Epoch {epoch_index}/{tot_epochs - 1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
-                f'train_loss: {current_loss:.4f}, A: {A :.2f}, P: {P :.2f}, R: {R :.2f}, Dice: {dice: .2f}')
-
-            # pbar_loader.set_description(f'Epoch {epoch_index}/{tot_epochs - 1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
-        #                                 f'train_loss: {current_loss:.4f}')
             if self.device != "cpu":
                 torch.cuda.synchronize()
 
@@ -215,45 +193,26 @@ class ModelClass(nn.Module):
             for batch, data in pbar_loader:
                 torch.cuda.empty_cache()  # Clear GPU memory
 
-                inputs, labels, _ = data  # _ == polys...
-                inputs = inputs.to(self.device)
+                inputs, labels, poly_box = self.unpack_data(data)
 
-                if not self.is_det:
-                    labels = labels.to(self.device)
-                else:
-                    labels.bboxes = labels.bboxes.to(self.device)
-                    labels.labels = labels.labels.to(self.device)
-
-                if not self.is_det:
-                    outputs = self.model(inputs)
-                    _ = self.loss_fun(outputs, labels)
-                else:
-                    x_enc, x_raw, x_pred = self.model(inputs)
-                    loss_dict = self.model.get_loss(x_raw, labels)
+                outputs, _ = self.compute_loss(inputs, labels, poly_box)
 
                 current_loss = self.loss_fun.get_current_value(batch)
 
                 if self.device != "cpu":
                     torch.cuda.synchronize()
 
+                if self.task == 'bbox':
+                    labels = poly_box
+
                 # computing metrics on batch
-                self.metrics.on_val_batch_end(outputs.float(), labels, batch)
-                # calling callbacks
-                self.callbacks.on_val_batch_end(outputs, labels, batch)
-                # updating roc and prc
-                self.loggers.on_val_batch_end(outputs, labels, batch)
+                self.metrics.on_val_batch_end(outputs, labels, batch)
+                # # calling callbacks
+                # self.callbacks.on_val_batch_end(outputs, labels, batch)
+                # # updating roc and prc
+                # self.loggers.on_val_batch_end(outputs, labels, batch)
 
-                # # updating pbar
-                A = self.metrics.A.v_value_mean
-                P = self.metrics.P.v_value_mean
-                R = self.metrics.R.v_value_mean
-                # AUC = self.metrics.AuC.v_value[1]
-                dice = self.metrics.Dice.v_value
-                description = f'Validation: val_loss: {current_loss:.4f}, A: {A :.2f}, ' \
-                              f'P: {P :.2f}, R: {R :.2f}, Dice: {dice :.2f}'
-
-                # description = f'Validation: val_loss: {current_loss:.4f}'
-                pbar_loader.set_description(description)
+                self.update_pbar(pbar_loader, current_loss, mode='val')
 
         if outputs is not None:
             # updating metrics dict
@@ -317,6 +276,83 @@ class ModelClass(nn.Module):
                     param.requires_grad = True
         else:
             self.model.train(True)
+
+    def update_pbar(self, pbar, current_loss, epoch_index=None, tot_epochs=None, gpu_used=None, mode='train' ):
+        if mode == 'train':
+            if self.task == 'seg':
+                # updating pbar
+                A = self.metrics.A.t_value_mean
+                P = self.metrics.P.t_value_mean
+                R = self.metrics.R.t_value_mean
+                # AUC = self.metrics.AuC.t_value[1]
+                dice = self.metrics.Dice.t_value
+
+                pbar.set_description(
+                    f'Epoch {epoch_index}/{tot_epochs - 1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
+                    f'train_loss: {current_loss:.4f}, A: {A :.2f}, P: {P :.2f}, R: {R :.2f}, Dice: {dice: .2f}')
+            elif self.task == 'bbox':
+                mAP50 = self.metrics.mAP50.t_value_mean
+                mAP50_95 = self.metrics.mAP50_95.t_value_mean
+                IoU = self.metrics.IoU.t_value_mean
+                pbar.set_description(
+                    f'Epoch {epoch_index}/{tot_epochs - 1}, GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
+                    f'train_loss: {current_loss:.4f}, IoU: {IoU: .2f}, mAP50: {mAP50}, mAP50_95: {mAP50_95:.2f}')
+            else:
+                raise NotImplementedError
+        elif mode == 'val':
+            if self.task == 'seg':
+                # # updating pbar
+                A = self.metrics.A.v_value_mean
+                P = self.metrics.P.v_value_mean
+                R = self.metrics.R.v_value_mean
+                # AUC = self.metrics.AuC.v_value[1]
+                dice = self.metrics.Dice.v_value
+                description = f'Validation: val_loss: {current_loss:.4f}, A: {A :.2f}, ' \
+                              f'P: {P :.2f}, R: {R :.2f}, Dice: {dice :.2f}'
+
+                # description = f'Validation: val_loss: {current_loss:.4f}'
+                pbar.set_description(description)
+            elif self.task == 'bbox':
+                mAP50 = self.metrics.mAP50.v_value_mean
+                mAP50_95 = self.metrics.mAP50_95.v_value_mean
+                IoU = self.metrics.IoU.v_value_mean
+                pbar.set_description(f'Validation: val_loss: {current_loss:.4f},  IoU: {IoU: .2f}, mAP50: {mAP50:.2f}, '
+                                     f'mAP50_95: {mAP50_95:.2f}')
+            else:
+                raise NotImplementedError
+
+    def unpack_data(self, data):
+        inputs, labels, poly_box = data
+        inputs = inputs.to(self.device)
+
+        if self.task == 'seg':
+            labels = labels.to(self.device)
+        elif self.task == 'bbox':
+            # poly_box.bboxes = poly_box.bboxes.to(self.device)
+            # poly_box.labels = poly_box.labels.to(self.device)
+            pass
+        else:
+            raise NotImplementedError
+
+        return inputs, labels, poly_box
+
+    def compute_loss(self, inputs, labs, poly_box):
+        if self.task == 'seg':
+            outputs = self.model(inputs)
+            loss = self.loss_fun(outputs, labs)
+            return outputs, loss
+        elif self.task == 'bbox':
+            x_enc, x_raw, x_pred = self.model(inputs)
+            loss_dict = self.model.get_loss(x_raw, poly_box)
+            loss = self.loss_fun(loss_dict)
+            # x_pred is [Instancedata{scores:[...], labels[...], bboxes:[...]}...]
+            return  x_pred, loss
+        else:
+            raise NotImplementedError
+
+
+
+
 
 
 class DistillatioModels(nn.Module):

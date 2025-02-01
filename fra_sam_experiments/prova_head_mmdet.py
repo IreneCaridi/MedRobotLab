@@ -3,8 +3,14 @@ import torch.nn as nn
 from torch import dtype
 import numpy as np
 
+from matplotlib import pyplot as plt
+import matplotlib.patches as patches
+
 from models.common import UNet
 from models.Rep_ViT import RepViT, RepViTBlock, RepViTEncDec
+
+from utils.CholectinstanceSeg_utils import get_mask_from_json
+from utils.image_handling import bbox_from_poly, center_crop_and_resize, adjust_bboxes
 
 from mmdet.models.dense_heads import YOLOXHead
 from mmdet.models.necks import FPN
@@ -36,7 +42,9 @@ train_cfg=dict(
 
 
 fpn = FPN(in_channels=[96, 192, 384], out_channels=96, num_outs=5)
-head = YOLOXHead(num_classes=2, in_channels=96, strides=[8, 16, 32, 64, 128], train_cfg=train_cfg['rpn'])
+head = YOLOXHead(num_classes=7, in_channels=96, strides=[8, 16, 32, 64, 128], train_cfg=train_cfg['rpn'],
+                 loss_obj = dict(type='CrossEntropyLoss', use_sigmoid=True, reduction='mean', loss_weight=1.0)
+                 )
 
 t1 = torch.rand((2, 96, 128, 128), dtype=torch.float32)
 t2 = torch.rand((2, 192, 64, 64), dtype=torch.float32)
@@ -77,28 +85,60 @@ loss = head.loss_by_feat(*p, batch_img_metas=batched_img_metas, batch_gt_instanc
 # print(loss)
 from PIL import Image
 
-m = RepViTDet()
-path_to_weights = r'C:\Users\franc\Documents\EdgeSAM\weights\edge_sam_3x.pth'
+m = RepViTDet(n_classes=7)
+path_to_weights = r'C:\Users\franc\Documents\MedRobotLab\EdgeSAM\weights\edge_sam_3x.pth'
 m.backbone.load_from(path_to_weights)
+# torch.save(m, r'data/weights_distill/RepViT_m1_edgeSAM.pth')
 
-img = np.array(Image.open(r'C:\Users\franc\OneDrive - Politecnico di Milano\dataset_mmi\images\train\image_1.png').convert('RGB'))
+src_img = r'C:\Users\franc\Documents\MedRobotLab\dataset\Cholect_dataset\images\test\seg8k_video12_015750.png'
+src_lab = src_img.replace('images', 'labels').replace('.png', '.json')
+
+
+img0 = np.array(Image.open(src_img).convert('RGB'))
+img = center_crop_and_resize(img0 / 255, 1024)
+
 x = torch.from_numpy(img).to(torch.float32).permute(2, 0, 1).unsqueeze(0)
 
+
+poly = get_mask_from_json(src_lab)
+bbox = bbox_from_poly([poly])
+bbox = adjust_bboxes(bbox, img0.shape[:-1], 1024)
+#
+# fig, ax = plt.subplots(1, 1)
+# ax.imshow(img)
+# for box, _ in bbox:
+#     x_min, y_min, x_max, y_max = box
+#     width = x_max - x_min  # Calculate width
+#     height = y_max - y_min  # Calculate height
+#
+#     # Add a rectangle for each bounding box
+#     rect = patches.Rectangle(
+#         (x_min, y_min), width, height, linewidth=2, edgecolor='red', facecolor='none'
+#     )
+#     ax.add_patch(rect)
+#
+# plt.show()
+
+
+y = InstanceData(metainfo=dict(img_shape=img.shape),
+                 bboxes=torch.tensor([box for box, _ in bbox], dtype=torch.float32).view(-1, 4),
+                 labels=torch.tensor([l for _, l in bbox], dtype=torch.long))
 
 # x = torch.rand((1, 3, 1024, 1024), dtype=torch.float32)
 
 x_enc, x_raw, x_pred = m(x)
 
-loss = m.get_loss(x_raw,  [i])
+loss = m.get_loss(x_raw,  [y])
+# box = 0.05, cls=0.3, obj, 0.7 (gain loss yolov5)
 
 print(loss)
 
-print(len(x_raw) )
-#
-# bbox = x_pred[0]['bboxes'].detach().numpy().tolist()
-# import matplotlib.pyplot as plt
-# import matplotlib.patches as patches
-#
+print(x_pred )
+
+bbox = x_pred[0]['bboxes'].detach().numpy().tolist()
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
 # f, ax = plt.subplots(1,1)
 #
 # ax.imshow(img)

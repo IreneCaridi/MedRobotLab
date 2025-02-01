@@ -10,14 +10,16 @@ from PIL import Image
 from collections import defaultdict
 import sys
 
+from mmengine.structures import InstanceData
+
 from ..CholectinstanceSeg_utils import get_mask_from_json
 from ..mmi_dataset_utils import get_mask_from_txt
 
-from ..image_handling import center_crop_and_resize, pad_and_resize, get_polygon_centroid
+from ..image_handling import center_crop_and_resize, pad_and_resize, get_polygon_centroid, bbox_from_poly
 from .. import my_logger
 from .collates import imgs_masks_polys, from_grid_crop
 from .augmentation import get_grid_patches
-from ..image_handling import bbox_from_poly, mask_list_to_array, get_three_points
+from ..image_handling import bbox_from_poly, mask_list_to_array, adjust_bboxes
 
 class DummyLoader(torch.utils.data.Dataset):
     def __init__(self, img_path, reshape_mode=None, reshaped_size=640):
@@ -74,6 +76,7 @@ class LoaderFromPath:
             - test_flag: whether to return the test set (it always split for it, simply it is not returned)
             - use_label: whether to load also labels
             - load_imgs: if True it directly loads images to RAM, else it stores paths-to-images
+            - use_bbox: whether to compute and retrieve bboxes
         """
         accepted_reshape_types = [None, 'crop', 'pad', 'grid']
         assert reshape_mode in accepted_reshape_types, f'{reshape_mode} not valid, chose from {accepted_reshape_types}'
@@ -108,7 +111,11 @@ class LoaderFromPath:
                     img = np.array(Image.open(self.img_path / folder / img_n).convert('RGB'))
                     if self.lab_suffix:
                         lab, poly = self.load_masks_labels(folder, Path(img_n).with_suffix(self.lab_suffix), img.shape[:2])
-                        imgs[folder].append((self.reshape_and_scale(img), (lab, poly)))
+                        if not self.use_bbox:
+                            imgs[folder].append((self.reshape_and_scale(img), (lab, poly)))
+                        else:
+                            imgs[folder].append((self.reshape_and_scale(img),
+                                                 (lab, self.get_bboxes_mmdet(poly, img.shape[:2]))))
                     else:
                         imgs[folder].append(self.reshape_and_scale(img))
                 else:  # folders to only load batches
@@ -126,6 +133,15 @@ class LoaderFromPath:
     def get_lab_type(self, folder='train'):  # every folder of a dataset should be same format...
         i = os.listdir(self.lab_path / folder)
         return Path(i[0]).suffix
+
+    def get_bboxes_mmdet(self, polys, img_shape: tuple):
+        bboxes = bbox_from_poly([polys])
+        bboxes = adjust_bboxes(bboxes, img_shape[:-1], self.reshape_size)
+
+        ann = InstanceData(metainfo=dict(img_shape=img_shape),
+                             bboxes=torch.tensor([box for box, _ in bboxes], dtype=torch.float32).view(-1, 4),
+                             labels=torch.tensor([l for _, l in bboxes], dtype=torch.long))
+        return ann
 
     def load_masks_labels(self, folder, lab_name, img_shape):
         # masks are a np.array with integer coded masks (fine for torch)
@@ -165,7 +181,7 @@ class LoaderFromPath:
 
 
 class LoaderFromData(torch.utils.data.Dataset):
-    def __init__(self, data, augmentation=None, reshape_mode=None, reshaped_size=640):
+    def __init__(self, data, augmentation=None, reshape_mode=None, reshaped_size=1024, use_bbox=False):
         """
             gets the data loaded by the LoadersFromPaths and creates an iterable torch-like dataloader
 
@@ -174,6 +190,7 @@ class LoaderFromData(torch.utils.data.Dataset):
                 - augmentation: probably I'll create an apposite object
                 - reshape_mode: how to get square imgs
                 - reshaped_size: target size as input to model
+                - use_bbox: whether to use bboxes or not
         """
         super().__init__()
 
@@ -181,6 +198,8 @@ class LoaderFromData(torch.utils.data.Dataset):
         assert reshape_mode in accepted_reshape_types, f'{reshape_mode} not valid, chose from {accepted_reshape_types}'
         self.reshape_mode = reshape_mode
         self.reshape_size = reshaped_size
+
+        self.use_bbox = use_bbox
 
         self.data = data
 
@@ -210,7 +229,7 @@ class LoaderFromData(torch.utils.data.Dataset):
                 return self.transform(x, [y, p])
             else:
                 x_p, y_p = self.data[idx]
-                x = self.reshape_and_scale(np.array(Image.open(x_p).convert('RGB')))
+                x = np.array(Image.open(x_p).convert('RGB'))
                 if self.reshape_mode == 'grid':
                     out = []
                     y, p = self.load_masks_labels(y_p, (480, 854))
@@ -220,7 +239,10 @@ class LoaderFromData(torch.utils.data.Dataset):
                     return out
                 else:
                     y, p = self.load_masks_labels(y_p, x.shape[:2])
-                    return self.transform(x, [y, p])
+                    if not self.use_bbox:
+                        return self.transform(self.reshape_and_scale(x), [y, p])
+                    else:
+                        return self.transform(self.reshape_and_scale(x), [y, self.get_bboxes_mmdet(p, x.shape[:2])])
         else:
             if self.already_loaded:  # check if paths or images are given
                 x = self.data[idx]
@@ -236,6 +258,15 @@ class LoaderFromData(torch.utils.data.Dataset):
             x = torch.from_numpy(x.astype('float32')).permute(2, 0, 1)
 
             return (x, torch.LongTensor(y[0]), y[1]) if y else x
+
+    def get_bboxes_mmdet(self, polys, img_shape: tuple):
+        bboxes = bbox_from_poly([polys])
+        bboxes = adjust_bboxes(bboxes, img_shape, self.reshape_size)
+
+        ann = InstanceData(metainfo=dict(img_shape=img_shape),
+                           bboxes=torch.tensor([box for box, _ in bboxes], dtype=torch.float32).view(-1, 4),
+                           labels=torch.tensor([l for _, l in bboxes], dtype=torch.long))
+        return ann
 
     def reshape_and_scale(self, img):
         if self.reshape_mode == 'pad':
@@ -276,7 +307,7 @@ class LoaderFromData(torch.utils.data.Dataset):
 
 
 def load_all(img_paths: list, reshape_mode=None, reshaped_size=1024, batch_size=4, test_flag=False, use_label=False,
-             n_workers=7, pin_memory=True, store_imgs=False):
+             n_workers=7, pin_memory=True, store_imgs=False, use_bbox=False):
     """
         loads all data in img_paths and returns the dataloaders for train, val and eventually test
 
@@ -289,6 +320,8 @@ def load_all(img_paths: list, reshape_mode=None, reshaped_size=1024, batch_size=
             - use_label: whether to use labels
             - n_workers: number of workers for parallel dataloading (rule of thumb: n° cpu core - 1)
             - pin_memory: whether to pin memory for more efficient passage to gpu
+            - store_imgs: whether to load all imgs in advance
+            - use_bbox: whether to use bbox
         returns:
             - train_loader, val_loader, (optional) test_loader : torch iterable dataloaders
     """
@@ -302,7 +335,7 @@ def load_all(img_paths: list, reshape_mode=None, reshaped_size=1024, batch_size=
 
     for p in img_paths:
         # loading from all paths and splitting
-        loader = LoaderFromPath(p, reshape_mode, reshaped_size, test_flag, use_label, store_imgs=store_imgs)
+        loader = LoaderFromPath(p, reshape_mode, reshaped_size, test_flag, use_label, store_imgs=store_imgs, use_bbox=use_bbox)
         train += loader.train
         val += loader.val
         test += loader.test
@@ -314,14 +347,17 @@ def load_all(img_paths: list, reshape_mode=None, reshaped_size=1024, batch_size=
     else:
         collate_fun = None
 
-    train_loader = torch.utils.data.DataLoader(LoaderFromData(train, reshape_mode=reshape_mode, reshaped_size=reshaped_size),
+    train_loader = torch.utils.data.DataLoader(LoaderFromData(train, reshape_mode=reshape_mode, reshaped_size=reshaped_size,
+                                                              use_bbox=use_bbox),
                                                batch_size=batch_size, shuffle=True, pin_memory=pin_memory,
                                                num_workers=n_workers, collate_fn=collate_fun)
-    val_loader = torch.utils.data.DataLoader(LoaderFromData(val, reshape_mode=reshape_mode, reshaped_size=reshaped_size),
+    val_loader = torch.utils.data.DataLoader(LoaderFromData(val, reshape_mode=reshape_mode, reshaped_size=reshaped_size,
+                                                            use_bbox=use_bbox),
                                              batch_size=batch_size, shuffle=True, pin_memory=pin_memory,
                                              num_workers=n_workers, collate_fn=collate_fun)
     if test_flag:
-        test_loader = torch.utils.data.DataLoader(LoaderFromData(test, reshape_mode=reshape_mode, reshaped_size=reshaped_size),
+        test_loader = torch.utils.data.DataLoader(LoaderFromData(test, reshape_mode=reshape_mode, reshaped_size=reshaped_size,
+                                                                 use_bbox=use_bbox),
                                                   batch_size=batch_size, shuffle=False, pin_memory=pin_memory,
                                                   num_workers=n_workers, collate_fn=collate_fun)
         return train_loader, val_loader, test_loader

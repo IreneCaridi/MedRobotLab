@@ -10,10 +10,11 @@ import wandb
 from models import DistillatioModels, check_load_model, SAM2handler, ModelClass
 from models.common import Dummy, UnetEncoder, UNet0
 from models.Rep_ViT import RepViT, RepViTEncDec, RepViTUnet
+from models.detection import RepViTDet
 from utils.DL.callbacks import Callbacks, EarlyStopping, Saver
 from utils.DL.loaders import load_all
 from utils.DL.optimizers import get_optimizer, scheduler
-from utils.DL.losses import SemanticLosses, FullLossKD, MSELoss
+from utils.DL.losses import SemanticLosses, FullLossKD, MSELoss, MmdetLossBbox
 from utils.DL.metrics import Metrics
 from utils.DL.logger import Loggers
 from utils import random_state, increment_path, json_from_parser, my_logger
@@ -65,15 +66,27 @@ def main(args):
     if args.as_encoder:
         enc_flag = True
         use_label_flag = False
+        use_box = False
+        metrics_mode = 'null'
         loss_fn = MSELoss(reduction="mean")
     elif args.as_predictor:
         enc_flag = False
         use_label_flag = True
+        use_box = False
+        metrics_mode = 'seg'
         loss_fn = FullLossKD(lamda_dist=0.25, alpha=1, gamma=2, lambdas_focal=(0.5, 0.5), weights=weights)
     elif args.only_supervised:
         enc_flag = False
         use_label_flag = True
+        use_box = False
+        metrics_mode = 'seg'
         loss_fn = SemanticLosses(alpha=1, gamma=2, lambdas=(0.5, 0.5), weight=weights)  # maybe consider weights...
+    elif args.rpn_training:
+        enc_flag = False
+        use_label_flag = True
+        use_box = True
+        metrics_mode = 'bbox'
+        loss_fn = MmdetLossBbox(reduction='mean', cls_lambda=1., bbox_lambda=1., obj_lambda=1.)
     else:
         raise AttributeError('ok it should not be possible to get there, you broke the parser lol')
 
@@ -87,15 +100,15 @@ def main(args):
 
         # if we get MMI data put them...
         dataset_path = Path(args.data_path)
-        data_paths = [dataset_path / p for f, p in zip([args.Cholect, args.AtlasDione, args.Kvasir],
-                                                       ['Cholect_dataset', 'AtlasDione_dataset', 'kvasir_dataset']) if f]
+        data_paths = [dataset_path / p for f, p in zip([args.Cholect, args.AtlasDione, args.Kvasir, args.prova],
+                                                       ['Cholect_dataset', 'AtlasDione_dataset', 'kvasir_dataset', 'prova_dataset']) if f]
 
     assert args.reshape_mode and args.reshape_size, 'both --reshape_size and --reshape_mode are needed together...'
 
     # loading dataset already as iterable torch loaders (train, val ,(optional) test)
     loaders = load_all(data_paths, args.reshape_mode, args.reshape_size, batch_size, test_flag=False,
                        use_label=use_label_flag, n_workers=args.n_workers, pin_memory=args.pin_memory,
-                       store_imgs=args.store_imgs)
+                       store_imgs=args.store_imgs, use_bbox=use_box)
 
     # model (ADJUST)
     if "." not in args.student:
@@ -113,6 +126,8 @@ def main(args):
             student = UNet0(out_classes)
         elif args.student == 'RepViTUnet':
             student = RepViTUnet(args.arch, out_classes, fuse=True)
+        elif args.student == 'RepViTDet':
+            student = RepViTDet(args.arch, out_classes, fuse=True)
         else:
             raise TypeError("Model name not recognised")
     else:
@@ -127,8 +142,7 @@ def main(args):
     saver = Saver(model=student, save_best=True, save_path=save_path, monitor="val_loss", mode='min')
     callbacks = Callbacks([stopper, saver])
 
-    # for encoder only it is just empty, ADJUST for decoder then
-    metrics = Metrics(loss_fn=loss_fn, num_classes=out_classes, device=device, top_k=1, thresh=0.5, seg=use_label_flag)
+    metrics = Metrics(loss_fn=loss_fn, mode=metrics_mode, num_classes=out_classes, device=device, top_k=1, thresh=0.5)
 
     opt = get_optimizer(student, args.opt, args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
 
@@ -144,10 +158,10 @@ def main(args):
                               as_encoder=enc_flag)
 
     # building model
-    if args.only_supervised:
+    if args.only_supervised or args.rpn_training:
         model = ModelClass(student, loaders, info_log=my_logger, loss_fn=loss_fn, device=device, AMP=args.AMP,
                            optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
-                           freeze=args.freeze_backbone)
+                           freeze=args.freeze_backbone, is_det=use_box)
     else:
         model = DistillatioModels(student, teacher, loaders, info_log=my_logger, loss_fn=loss_fn, device=device, AMP=args.AMP,
                                   optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
@@ -212,11 +226,14 @@ if __name__ == "__main__":
     parser.add_argument('--Cholect', action="store_true", help='whether to use Cholect dataset')
     parser.add_argument('--AtlasDione', action="store_true", help='whether to use AtlasDione dataset')
     parser.add_argument('--Kvasir', action="store_true", help='whether to use Kvasir dataset')
+    parser.add_argument('--prova', action="store_true", help='whether to use the 3 img dataset for debugging')
+
 
     group1 = parser.add_mutually_exclusive_group(required=True)
     group1.add_argument('--as_encoder', action="store_true", help='whether to do encoder KD')
     group1.add_argument('--as_predictor', action="store_true", help='whether to do masks KD')
     group1.add_argument('--only_supervised', action="store_true", help='whether to train with just gt (no KD)')
+    group1.add_argument('--rpn_training', action="store_true", help='whether to train an object detector')
 
     # loaders params
     parser.add_argument('--n_workers', type=int, default=0, help='number of workers for parallel dataloading ')

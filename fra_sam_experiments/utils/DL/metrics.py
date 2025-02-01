@@ -28,7 +28,7 @@ class BaseMetric(BaseCallback):
 
     def on_train_batch_end(self, output=None, target=None, batch=None):
         if self.device == "cpu":
-            output = output.to("cpu")
+            output = output.float().to("cpu")
             target = target.to("cpu")
         _ = self.metric(output, target)
         self.t_value = self.metric.compute()  # value computed along every batch
@@ -39,7 +39,7 @@ class BaseMetric(BaseCallback):
 
     def on_val_batch_end(self, output=None, target=None, batch=None):
         if self.device == "cpu":
-            output = output.to("cpu")
+            output = output.float().to("cpu")
             target = target.to("cpu")
         _ = self.metric(output, target)
         self.v_value = self.metric.compute()  # value computed along every batch
@@ -125,23 +125,204 @@ class AUC(BaseMetric):
         self.metric = torchmetrics.classification.AUROC(task="multiclass", num_classes=num_classes,
                                                         average=None, thresholds=thresh).to(self.device)
 
+class mAP50(BaseMetric):
+    """
+    args:
+        - num_classes: number of classes
+        - device: device "cpu" or "gpu"
+    """
+    def __init__(self, num_classes=2, device="gpu"):
+        super().__init__(num_classes, device)
+
+        self.metric = torchmetrics.detection.MeanAveragePrecision(iou_type="bbox", class_metrics=True, average="macro",
+                                                                  iou_thresholds=[0.5]).to(self.device)
+
+    def on_train_batch_end(self, output=None, target=None, batch=None):
+        # if self.device == "cpu":
+        #     output = output.to("cpu")
+        #     target = target.to("cpu")
+
+        p_list=[]
+        t_list=[]
+        for p, t in zip(output, target):
+            p_list.append(dict(boxes=p['bboxes'].detach(), labels=p['labels'], scores=p['scores'].detach()))
+            t_list.append(dict(boxes=t['bboxes'], labels=t['labels']))
+        _ = self.metric(p_list, t_list)
+        out_dict = self.metric.compute()  # value computed along every batch
+        self.t_value = self.get_per_class_metric(out_dict)
+
+        self.t_value_mean = out_dict['map'] if out_dict['map'] != -1 else 0.
+
+    def on_val_batch_end(self, output=None, target=None, batch=None):
+        # if self.device == "cpu":
+        #     output = output.to("cpu")
+        #     target = target.to("cpu")
+
+        p_list = []
+        t_list = []
+        for p, t in zip(output, target):
+            p_list.append(dict(boxes=p['bboxes'].detach(), labels=p['labels'], scores=p['scores'].detach()))
+            t_list.append(dict(boxes=t['bboxes'], labels=t['labels']))
+        _ = self.metric(p_list, t_list)
+        out_dict = self.metric.compute()  # value computed along every batch
+        self.v_value = self.get_per_class_metric(out_dict)
+
+        self.v_value_mean = out_dict['map'] if out_dict['map'] != -1 else 0.
+
+    def get_per_class_metric(self, out_dict):
+        classes = out_dict['classes']
+        map = out_dict['map_per_class']
+        value = torch.zeros(self.num_classes)
+
+        for i, c in enumerate(classes):
+            value[c] = map[i] if map[i] != -1 else 0.
+
+        return value
+
+
+class mAP50_95(BaseMetric):
+    """
+        args:
+            - num_classes: number of classes
+            - device: device "cpu" or "gpu"
+            - iou_threshold: list of IoU thresholds for positive samples
+    """
+    def __init__(self, num_classes=2, device="gpu"):
+        super().__init__(num_classes, device)
+
+        # default iou_thresholds are for mAP_50_95
+        self.metric = torchmetrics.detection.MeanAveragePrecision(iou_type="bbox", class_metrics=True, average="macro").to(self.device)
+
+    def on_train_batch_end(self, output=None, target=None, batch=None):
+        # if self.device == "cpu":
+        #     output = output.to("cpu")
+        #     target = target.to("cpu")
+
+        p_list=[]
+        t_list=[]
+        for p, t in zip(output, target):
+            p_list.append(dict(boxes=p['bboxes'].detach(), labels=p['labels'], scores=p['scores'].detach()))
+            t_list.append(dict(boxes=t['bboxes'], labels=t['labels']))
+        _ = self.metric(p_list, t_list)
+        out_dict = self.metric.compute()  # value computed along every batch
+
+        self.t_value = self.get_per_class_metric(out_dict)
+
+        self.t_value_mean = out_dict['map'] if out_dict['map'] != -1 else 0.
+
+
+    def on_val_batch_end(self, output=None, target=None, batch=None):
+        # if self.device == "cpu":
+        #     output = output.to("cpu")
+        #     target = target.to("cpu")
+
+        p_list = []
+        t_list = []
+        for p, t in zip(output, target):
+            p_list.append(dict(boxes=p['bboxes'].detach(), labels=p['labels'], scores=p['scores'].detach()))
+            t_list.append(dict(boxes=t['bboxes'], labels=t['labels']))
+        _ = self.metric(p_list, t_list)
+        out_dict = self.metric.compute()  # value computed along every batch
+
+        self.v_value = self.get_per_class_metric(out_dict)
+
+        self.v_value_mean = out_dict['map'] if out_dict['map'] != -1 else 0.
+
+    def get_per_class_metric(self, out_dict):
+        classes = out_dict['classes']
+        map = out_dict['map_per_class']
+        value = torch.zeros(self.num_classes)
+
+        for i, c in enumerate(classes):
+            value[c] = map[i] if map[i] != -1 else 0.
+
+        return value
+
+
+class IoU(BaseMetric):
+    """
+        args:
+            - num_classes: number of classes
+            - device: device "cpu" or "gpu"
+            - iou_threshold: list of IoU thresholds for positive samples
+    """
+    def __init__(self, num_classes=2, device="gpu"):
+        super().__init__(num_classes, device)
+
+        # default iou_thresholds are for mAP_50_95
+        self.metric = torchmetrics.detection.IntersectionOverUnion(class_metrics=True).to(self.device)
+
+    def on_train_batch_end(self, output=None, target=None, batch=None):
+        # if self.device == "cpu":
+        #     output = output.to("cpu")
+        #     target = target.to("cpu")
+
+        p_list=[]
+        t_list=[]
+        for p, t in zip(output, target):
+            p_list.append(dict(boxes=p['bboxes'].detach(), labels=p['labels']))
+            t_list.append(dict(boxes=t['bboxes'], labels=t['labels']))
+        _ = self.metric(p_list, t_list)
+        out_dict = self.metric.compute()  # value computed along every batch
+        self.t_value = self.get_per_class_metric(out_dict)
+
+        self.t_value_mean = out_dict['iou']
+
+
+    def on_val_batch_end(self, output=None, target=None, batch=None):
+        # if self.device == "cpu":
+        #     output = output.to("cpu")
+        #     target = target.to("cpu")
+
+        p_list = []
+        t_list = []
+        for p, t in zip(output, target):
+            p_list.append(dict(boxes=p['bboxes'].detach(), labels=p['labels']))
+            t_list.append(dict(boxes=t['bboxes'], labels=t['labels']))
+        _ = self.metric(p_list, t_list)
+        out_dict = self.metric.compute()  # value computed along every batch
+        self.v_value = self.get_per_class_metric(out_dict)
+
+        self.v_value_mean = out_dict['iou']
+
+    def get_per_class_metric(self, out_dict):
+        value = torch.zeros(self.num_classes)
+
+        for k in out_dict.keys():
+            if k != 'iou':
+                value[int(k[-1])] = out_dict[k]
+
+        return value
 
 class Metrics(BaseCallback):
-    def __init__(self, loss_fn, num_classes=2, device="cpu", top_k=1, thresh=0.5, seg=False):
+    def __init__(self, loss_fn, mode, num_classes=2, device="cpu", top_k=1, thresh=0.5):
         """
 
             wrapper for metrics to be used in the model
 
         """
-        if seg:
+        if mode == 'seg':
             self.A = Accuracy(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
             self.P = Precision(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
             self.R = Recall(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
-            # self.AuC = AUC(num_classes=num_classes, device=device, thresh=None)
             self.Dice = Dice(num_classes=num_classes, device=device)
             self.metrics = [self.A, self.P, self.R, self.Dice]
-        else:
+        elif mode == 'bbox':
+            self.mAP50 = mAP50(num_classes, device)
+            self.mAP50_95 = mAP50_95(num_classes, device)
+            self.IoU = IoU(num_classes, device)
+            self.metrics = [self.mAP50, self.mAP50_95, self.IoU]
+        elif mode == 'cls':
+            self.A = Accuracy(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
+            self.P = Precision(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
+            self.R = Recall(num_classes=num_classes, device=device, top_k=top_k, thresh=thresh)
+            self.AuC = AUC(num_classes=num_classes, device=device, thresh=None)
+
+            self.metrics = [self.A, self.P, self.R, self.AuC]
+        elif mode == 'null':
             self.metrics = []
+        else:
+            raise NotImplementedError
         self.loss_fn = loss_fn
         self.dict = self.build_metrics_dict()
         self.num_classes = num_classes
