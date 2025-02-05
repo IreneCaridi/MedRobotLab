@@ -323,7 +323,7 @@ class Metrics(BaseCallback):
             self.metrics = []
         else:
             raise NotImplementedError
-        self.loss_fn = loss_fn
+        self.loss_fn = loss_fn  # set to None for test
         self.dict = self.build_metrics_dict()
         self.num_classes = num_classes
 
@@ -332,8 +332,9 @@ class Metrics(BaseCallback):
             obj.on_train_batch_end(output, target, batch)
 
     def on_train_end(self, num_batches=None):
-        for k in self.loss_fn.running_dict.keys():
-            self.dict["train_" + k] = [self.loss_fn.running_dict[k] / num_batches]  # all scalars
+        if self.loss_fn:
+            for k in self.loss_fn.running_dict.keys():
+                self.dict["train_" + k] = [self.loss_fn.running_dict[k] / num_batches]  # all scalars
 
         for obj in self.metrics:
             name = "train_" + obj.__class__.__name__
@@ -348,8 +349,9 @@ class Metrics(BaseCallback):
             obj.on_val_start()
 
     def on_val_end(self, num_batches=None, epoch=None):
-        for k in self.loss_fn.running_dict.keys():
-            self.dict["val_" + k] = [self.loss_fn.running_dict[k] / num_batches]  # all scalars
+        if self.loss_fn:
+            for k in self.loss_fn.running_dict.keys():
+                self.dict["val_" + k] = [self.loss_fn.running_dict[k] / num_batches]  # all scalars
 
         for obj in self.metrics:
             name = "val_" + obj.__class__.__name__
@@ -370,7 +372,8 @@ class Metrics(BaseCallback):
     def build_metrics_dict(self):
 
         names = [obj.__class__.__name__ for obj in self.metrics]
-        names += [k for k in self.loss_fn.running_dict.keys()]
+        if self.loss_fn:
+            names += [k for k in self.loss_fn.running_dict.keys()]
         keys = ["train_"+name for name in names] + ["val_"+name for name in names]
         # keys = ["train_" + name for name in names if 'loss' in name] + ["val_" + name for name in names]
 

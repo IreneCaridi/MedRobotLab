@@ -259,7 +259,7 @@ class FullLossKD(nn.Module):
                             {k: self.l_gt.running_dict[k] for k in self.l_gt.running_dict.keys() if k != 'loss'}
 
 
-class MmdetLossBbox(nn.Module):
+class MmdetLossYolox(nn.Module):
     def __init__(self, reduction='mean', cls_lambda=1., bbox_lambda=1., obj_lambda=1.):
         super().__init__()
 
@@ -271,7 +271,7 @@ class MmdetLossBbox(nn.Module):
         self.reduction = reduction
 
     def forward(self, loss_dict):
-        loss = self.cls_lambda * loss_dict['loss_cls'] + self.bbox_lambda * loss_dict['loss_bbox'] + loss_dict['loss_obj']
+        loss = self.cls_lambda * loss_dict['loss_cls'] + self.bbox_lambda * loss_dict['loss_bbox'] + self.obj_lambda * loss_dict['loss_obj']
         self.accumulate(loss, loss_dict)
         return loss
 
@@ -296,6 +296,41 @@ class MmdetLossBbox(nn.Module):
     def reset(self):
         self.running_dict = {'loss': 0., 'loss_cls': 0., 'loss_bbox': 0., 'loss_obj': 0.}
 
+
+class MmdetLossCenterNet(nn.Module):
+    def __init__(self, reduction='mean', cls_lambda=1., bbox_lambda=1.):
+        super().__init__()
+
+        self.running_dict = {'loss': 0., 'loss_cls': 0., 'loss_bbox': 0.}
+        self.cls_lambda = cls_lambda
+        self.bbox_lambda = bbox_lambda
+
+        self.reduction = reduction
+
+    def forward(self, loss_dict):
+        loss = self.cls_lambda * loss_dict['loss_cls'] + self.bbox_lambda * loss_dict['loss_bbox']
+        self.accumulate(loss, loss_dict)
+        return loss
+
+    def accumulate(self, batch_loss, loss_dict):
+        self.running_dict['loss'] += batch_loss.item()
+        self.running_dict['loss_cls'] += loss_dict['loss_cls'].item()
+        self.running_dict['loss_bbox'] += loss_dict['loss_bbox'].item()
+
+    def get_current_value(self, batch_n, only_loss=True):
+        n = batch_n + 1  # batch_n is [0, N-1]
+        if only_loss:
+            return self.running_dict['loss'] / n
+        else:
+            if self.reduction == 'mean':
+                return {self.running_dict[k] / n for k in self.running_dict.keys()}
+            elif self.reduction == 'sum':
+                return self.running_dict
+            else:
+                raise NotImplementedError
+
+    def reset(self):
+        self.running_dict = {'loss': 0., 'loss_cls': 0., 'loss_bbox': 0.}
 
 
 

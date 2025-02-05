@@ -9,6 +9,7 @@ import wandb
 from pathlib import Path
 
 from .callbacks import BaseCallback
+from ..plot import color_map
 
 
 class LogsHolder(BaseCallback):
@@ -49,12 +50,14 @@ class LogsHolder(BaseCallback):
                     self.dict[key].append(np.float16(sum(flat) / len(flat)))  # mean value
         else:
             for key in self.metrics.dict:
-                if 'train' not in key:
+                # used 'val' keys for storing test logs...
+                if 'val' in key:
                     if "loss" in key:
                         pass
                     else:
                         for i in range(len(self.metrics.dict[key])):
-                            self.dict[key + f"_{i}"].append(self.metrics.dict[key][i])
+                            if i not in self.ignore_class:
+                                self.dict[key + f"_{i}"].append(self.metrics.dict[key][i])
                         flat = [item for item in self.metrics.dict[key]]
                         self.dict[key].append(np.float16(sum(flat) / len(flat)))  # mean value
         if self.wandb:
@@ -99,7 +102,7 @@ class SaveCSV(BaseCallback):
 
     def write_csv(self):
         if self.test:
-            df = pd.DataFrame({key: self.dict[key] for key in self.dict if 'train' not in key and 'loss' not in key})
+            df = pd.DataFrame({key.replace('val_',''): self.dict[key] for key in self.dict if 'train' not in key and 'loss' not in key})
         else:
             df = pd.DataFrame(self.dict)
         csv_path = self.save_path / self.file_name
@@ -397,13 +400,62 @@ class ConfusionMatrixLogger(BaseCallback):
         pass
 
 
+class SavePreds(BaseCallback):
+    """
+        saves the predicted mask over all images
+
+        :param
+            --logs = LogsHolder object
+    """
+    def __init__(self, save_path):
+        super().__init__()
+        self.save_path = Path(save_path) / 'preds'
+
+
+    def on_epoch_start(self, epoch=None, max_epoch=None):
+        os.makedirs(self.save_path, exist_ok=True)
+
+    def on_val_batch_end(self, output=None, target=None, batch=None):
+
+        # outputs are preds, target is img; both as tensor
+        # batch contains the metas with name of imgs
+
+        imgs = [x.squeeze().permute(1,2,0).cpu().numpy() for x in target]  # H,W,C
+
+        preds = [x.squeeze().cpu().numpy() for x in output.argmax(1)]  # H,W
+
+        names = [Path(x['metainfo']['img_path']).name for x in batch]
+
+        self.save(imgs, preds, names)
+
+
+    def show_mask(self, pred, ax):
+        colormap = np.array([[0., 0., 0., 0.]] + [color_map[i + 1] + [0.3] for i in range(len(color_map))])
+
+        pred = colormap[pred]
+
+        ax.imshow(pred)
+
+    def save(self, imgs, preds, names):
+        for i, p, n in zip(imgs, preds, names):
+            f, a = plt.subplots(1, figsize=(20, 11))
+            a.imshow(i)
+            self.show_mask(p, a)
+            a.axis('off')
+            plt.tight_layout()
+            plt.savefig(self.save_path / n, dpi=96)
+            plt.close()
+
 class Loggers(BaseCallback):
     def __init__(self, metrics, opt, save_path, test, wandb):
         super().__init__()
         self.logs = LogsHolder(metrics, test=test, wandb=wandb)
         self.csv = SaveCSV(self.logs, save_path, test=test)
-        self.lr = LrLogger(opt, save_path, wandb=wandb)
-        self.figure_saver = SaveFigures(self.logs, save_path)
+        if not test:
+            self.lr = LrLogger(opt, save_path, wandb=wandb)
+            self.figure_saver = SaveFigures(self.logs, save_path)
+        else:
+            self.preds_saver = SavePreds(save_path)
         # self.ROC = ROClogger(save_path, num_classes=metrics.num_classes, device=device)
         # self.PRC = PRClogger(save_path, num_classes=metrics.num_classes, device=device)
         # self.cm = ConfusionMatrixLogger(save_path, metrics.num_classes, device)
@@ -414,6 +466,10 @@ class Loggers(BaseCallback):
             obj.on_epoch_end(epoch)
 
     def on_val_batch_end(self, output=None, target=None, batch=None):
+        for obj in self.list:
+            obj.on_val_batch_end(output, target, batch)
+
+    def on_train_batch_end(self, output=None, target=None, batch=None):
         for obj in self.list:
             obj.on_val_batch_end(output, target, batch)
 

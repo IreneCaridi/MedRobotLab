@@ -17,6 +17,7 @@ def check_load_model(model, backbone_weights, info_logger):
         if isinstance(model, nn.Module):
             return model
         elif isinstance(model, str) and Path(model).suffix == ".pt" or ".pth":
+            info_logger.info(f"Loading weights from {model}")
             return torch.load(model, map_location=torch.device('cpu'))
         else:
             raise TypeError("model not recognised")
@@ -158,7 +159,6 @@ class ModelClass(nn.Module):
             with torch.no_grad():
                 if self.task == 'bbox':
                     labs = poly_box
-
 
                 # computing training metrics
                 self.metrics.on_train_batch_end(outputs, labs, batch)
@@ -328,9 +328,9 @@ class ModelClass(nn.Module):
         if self.task == 'seg':
             labels = labels.to(self.device)
         elif self.task == 'bbox':
-            # poly_box.bboxes = poly_box.bboxes.to(self.device)
-            # poly_box.labels = poly_box.labels.to(self.device)
-            pass
+            for ann in poly_box:
+                ann['bboxes'] = ann['bboxes'].to(self.device)
+                ann['labels'] = ann['labels'].to(self.device)
         else:
             raise NotImplementedError
 
@@ -349,10 +349,6 @@ class ModelClass(nn.Module):
             return  x_pred, loss
         else:
             raise NotImplementedError
-
-
-
-
 
 
 class DistillatioModels(nn.Module):
@@ -609,6 +605,109 @@ class DistillatioModels(nn.Module):
         self.loggers.on_end()
         # calling callbacks (saving last model) #
         self.callbacks.on_end()
+
+
+class ModelTest(nn.Module):
+    def __init__(self, model, loader, device='cpu', metrics=None, loggers=None, info_log=None):
+        super().__init__()
+        """
+        :param
+            --model: complete Torch model to test
+            --loader: test loader
+            --device: str for gpu or cpu
+            --metrics: metrics instance for computing metrics callbacks
+            --loggers: loggers instance
+            --is_det: flag whether you are using a detection head
+        """
+
+        assert isinstance(info_log, logging.Logger), 'provided info_log is not a logger'
+        self.my_logger = info_log
+
+        if isinstance(model, nn.Module):
+            self.model = model
+            self.model.eval()
+        else:
+            raise TypeError("model not recognised")
+
+        self.test_loader = loader
+        if device == 'gpu':
+            if torch.cuda.is_available():
+                self.device = 'cuda:0'
+                gpu_properties = torch.cuda.get_device_properties(self.device)
+                self.gpu_mem = gpu_properties.total_memory / (1024 ** 3)
+            else:
+                self.my_logger.info('no gpu found')
+                self.gpu_mem = 0
+                self.device = 'cpu'
+        else:
+            self.device = 'cpu'
+            self.gpu_mem = 0
+
+        self.my_logger.info(f"loading model to device={self.device}")
+        self.model.to(self.device)
+
+        self.metrics = metrics
+
+        self.loggers = loggers
+
+        total_params = sum(p.numel() for p in self.model.parameters())
+        self.my_logger.info(f"'{self.model.name}' - Total parameters: {total_params / 1e6:.2f}M")
+
+    def test_loop(self):
+
+        # initializing progress bar
+        description = 'Test'
+        pbar_loader = tqdm(enumerate(self.test_loader), total=len(self.test_loader), desc=description, unit='batch',
+                           bar_format=TQDM_BAR_FORMAT)
+
+        self.metrics.on_epoch_start()
+        self.loggers.on_epoch_start(epoch=0, max_epoch=0)
+
+        with torch.no_grad():
+            for batch, data in pbar_loader:
+                torch.cuda.empty_cache()  # Clear GPU memory
+                gpu_used = torch.cuda.max_memory_allocated() / (1024 ** 3)
+
+                inputs, labs, poly_box = self.unpack_data(data)
+
+                outputs = self.model(inputs)
+
+                # computing training metrics
+                self.metrics.on_val_batch_end(outputs, labs, batch)
+                self.loggers.on_val_batch_end(outputs, inputs, poly_box)
+
+                self.update_pbar(pbar_loader, gpu_used)
+
+                if self.device != "cpu":
+                    torch.cuda.synchronize()
+
+        # updating dictionary
+        self.metrics.on_val_end(batch + 1)
+
+        # logging results
+        self.loggers.on_epoch_end(0)
+
+        # logging metrics images
+        self.loggers.on_end()
+
+    def update_pbar(self, pbar, gpu_used=None):
+        # updating pbar
+        A = self.metrics.A.t_value_mean
+        P = self.metrics.P.t_value_mean
+        R = self.metrics.R.t_value_mean
+        # AUC = self.metrics.AuC.t_value[1]
+        dice = self.metrics.Dice.t_value
+
+        pbar.set_description(f'GPU_mem: {gpu_used:.2f}/{self.gpu_mem:.2f}, '
+                             f'A: {A :.2f}, P: {P :.2f}, R: {R :.2f}, Dice: {dice: .2f}')
+
+    def unpack_data(self, data):
+        inputs, labels, poly_box = data
+        inputs = inputs.to(self.device)
+
+        labels = labels.to(self.device)
+
+        return inputs, labels, poly_box
 
 
 # placing myself in sam2

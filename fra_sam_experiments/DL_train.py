@@ -10,11 +10,11 @@ import wandb
 from models import DistillatioModels, check_load_model, SAM2handler, ModelClass
 from models.common import Dummy, UnetEncoder, UNet0
 from models.Rep_ViT import RepViT, RepViTEncDec, RepViTUnet
-from models.detection import RepViTDet
+from models.detection import RepViTDetYolox, RepViTDetCenterNet
 from utils.DL.callbacks import Callbacks, EarlyStopping, Saver
 from utils.DL.loaders import load_all
 from utils.DL.optimizers import get_optimizer, scheduler
-from utils.DL.losses import SemanticLosses, FullLossKD, MSELoss, MmdetLossBbox
+from utils.DL.losses import SemanticLosses, FullLossKD, MSELoss, MmdetLossYolox, MmdetLossCenterNet
 from utils.DL.metrics import Metrics
 from utils.DL.logger import Loggers
 from utils import random_state, increment_path, json_from_parser, my_logger
@@ -86,7 +86,6 @@ def main(args):
         use_label_flag = True
         use_box = True
         metrics_mode = 'bbox'
-        loss_fn = MmdetLossBbox(reduction='mean', cls_lambda=1., bbox_lambda=1., obj_lambda=1.)
     else:
         raise AttributeError('ok it should not be possible to get there, you broke the parser lol')
 
@@ -94,7 +93,7 @@ def main(args):
     json_from_parser(args, save_path)
 
     # checking for dataset
-    if not args.MMI and not args.Cholect and not args.AtlasDione and not args.Kvasir:
+    if not args.MMI and not args.Cholect and not args.AtlasDione and not args.Kvasir and not args.prova:
         raise AttributeError('at least one of --MMI, --Cholect, --AtlasDione, --Kvasir arguments must be provided...')
     else:
 
@@ -126,8 +125,12 @@ def main(args):
             student = UNet0(out_classes)
         elif args.student == 'RepViTUnet':
             student = RepViTUnet(args.arch, out_classes, fuse=True)
-        elif args.student == 'RepViTDet':
-            student = RepViTDet(args.arch, out_classes, fuse=True)
+        elif args.student == 'RepViTDetYolox':
+            student = RepViTDetYolox(args.arch, out_classes, fuse=True)
+            loss_fn = MmdetLossYolox(reduction='mean', cls_lambda=1., bbox_lambda=1., obj_lambda=1.)
+        elif args.student == 'RepViTDetCenterNet':
+            student = RepViTDetCenterNet(args.arch, out_classes, fuse=True)
+            loss_fn = MmdetLossCenterNet(reduction='mean', cls_lambda=1e-4, bbox_lambda=1.)
         else:
             raise TypeError("Model name not recognised")
     else:
@@ -152,17 +155,15 @@ def main(args):
     # lr scheduler
     sched = scheduler(opt, args.sched, args.lrf, epochs)
 
-    if not args.only_supervised:
-        # loading sam as teacher (SAM2_image_predictor instance -- SAM2(nn.module) is in teacher.model)
-        teacher = SAM2handler(Path(parent_dir) / args.SAM2_weights, args.SAM2_configs, info_log=my_logger,
-                              as_encoder=enc_flag)
-
     # building model
     if args.only_supervised or args.rpn_training:
         model = ModelClass(student, loaders, info_log=my_logger, loss_fn=loss_fn, device=device, AMP=args.AMP,
                            optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
                            freeze=args.freeze_backbone, is_det=use_box)
     else:
+        # loading sam as teacher (SAM2_image_predictor instance -- SAM2(nn.module) is in teacher.model)
+        teacher = SAM2handler(Path(parent_dir) / args.SAM2_weights, args.SAM2_configs, info_log=my_logger,
+                              as_encoder=enc_flag)
         model = DistillatioModels(student, teacher, loaders, info_log=my_logger, loss_fn=loss_fn, device=device, AMP=args.AMP,
                                   optimizer=opt, metrics=metrics, loggers=logger, callbacks=callbacks, sched=sched,
                                   as_encoder=enc_flag)
@@ -200,7 +201,7 @@ if __name__ == "__main__":
     parser.add_argument('--reshape_size', type=int, default=1024, help='the finel shape input to model')
 
     # loggers option
-    parser.add_argument('--wandb', type=str, default=None, help='name of wandb profile (if None means not logging)')
+    parser.add_argument('--wandb', type=str, default=None, help='name of wandb profile (if None means not logging) (MedRobLab)')
 
     parser.add_argument('--epochs', type=int, required=True, help='number of epochs')
     parser.add_argument('--batch_size', type=int, required=True, help='batch size')

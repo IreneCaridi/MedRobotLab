@@ -4,8 +4,8 @@ networkx==3.2.1
 numpy==1.26.3
 opencv-python==4.10.0.84
 PyYAML==6.0.2
-torch==2.5.0
-torchvision==0.20.0
+torch==2.0.0 # + cu118
+torchvision==0.15.1 # + cu118
 tqdm==4.66.5
 typing_extensions==4.9.0
 pandas==2.2.2
@@ -13,4 +13,7 @@ torchmetrics
 shapely==2.0.6
 timm
 wandb
+mmengine==0.10.5
+mmdet==3.3.0
+mmcv==2.1.0
 

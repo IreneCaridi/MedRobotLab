@@ -115,7 +115,7 @@ class LoaderFromPath:
                             imgs[folder].append((self.reshape_and_scale(img), (lab, poly)))
                         else:
                             imgs[folder].append((self.reshape_and_scale(img),
-                                                 (lab, self.get_bboxes_mmdet(poly, img.shape[:2]))))
+                                                 (lab, self.get_bboxes_mmdet(poly, img.shape[:2], img_n))))
                     else:
                         imgs[folder].append(self.reshape_and_scale(img))
                 else:  # folders to only load batches
@@ -134,11 +134,11 @@ class LoaderFromPath:
         i = os.listdir(self.lab_path / folder)
         return Path(i[0]).suffix
 
-    def get_bboxes_mmdet(self, polys, img_shape: tuple):
+    def get_bboxes_mmdet(self, polys, img_shape: tuple, img_path):
         bboxes = bbox_from_poly([polys])
         bboxes = adjust_bboxes(bboxes, img_shape[:-1], self.reshape_size)
 
-        ann = InstanceData(metainfo=dict(img_shape=img_shape),
+        ann = InstanceData(metainfo=dict(img_shape=img_shape, img_path=img_path),
                              bboxes=torch.tensor([box for box, _ in bboxes], dtype=torch.float32).view(-1, 4),
                              labels=torch.tensor([l for _, l in bboxes], dtype=torch.long))
         return ann
@@ -242,7 +242,7 @@ class LoaderFromData(torch.utils.data.Dataset):
                     if not self.use_bbox:
                         return self.transform(self.reshape_and_scale(x), [y, p])
                     else:
-                        return self.transform(self.reshape_and_scale(x), [y, self.get_bboxes_mmdet(p, x.shape[:2])])
+                        return self.transform(self.reshape_and_scale(x), [y, self.get_bboxes_mmdet(p, x.shape[:2], x_p)])
         else:
             if self.already_loaded:  # check if paths or images are given
                 x = self.data[idx]
@@ -259,11 +259,11 @@ class LoaderFromData(torch.utils.data.Dataset):
 
             return (x, torch.LongTensor(y[0]), y[1]) if y else x
 
-    def get_bboxes_mmdet(self, polys, img_shape: tuple):
+    def get_bboxes_mmdet(self, polys, img_shape: tuple, img_path):
         bboxes = bbox_from_poly([polys])
         bboxes = adjust_bboxes(bboxes, img_shape, self.reshape_size)
 
-        ann = InstanceData(metainfo=dict(img_shape=img_shape),
+        ann = InstanceData(metainfo=dict(img_shape=img_shape, img_path=img_path),
                            bboxes=torch.tensor([box for box, _ in bboxes], dtype=torch.float32).view(-1, 4),
                            labels=torch.tensor([l for _, l in bboxes], dtype=torch.long))
         return ann
@@ -347,20 +347,21 @@ def load_all(img_paths: list, reshape_mode=None, reshaped_size=1024, batch_size=
     else:
         collate_fun = None
 
-    train_loader = torch.utils.data.DataLoader(LoaderFromData(train, reshape_mode=reshape_mode, reshaped_size=reshaped_size,
-                                                              use_bbox=use_bbox),
-                                               batch_size=batch_size, shuffle=True, pin_memory=pin_memory,
-                                               num_workers=n_workers, collate_fn=collate_fun)
-    val_loader = torch.utils.data.DataLoader(LoaderFromData(val, reshape_mode=reshape_mode, reshaped_size=reshaped_size,
-                                                            use_bbox=use_bbox),
-                                             batch_size=batch_size, shuffle=True, pin_memory=pin_memory,
-                                             num_workers=n_workers, collate_fn=collate_fun)
+
     if test_flag:
         test_loader = torch.utils.data.DataLoader(LoaderFromData(test, reshape_mode=reshape_mode, reshaped_size=reshaped_size,
                                                                  use_bbox=use_bbox),
                                                   batch_size=batch_size, shuffle=False, pin_memory=pin_memory,
                                                   num_workers=n_workers, collate_fn=collate_fun)
-        return train_loader, val_loader, test_loader
+        return test_loader
     else:
+        train_loader = torch.utils.data.DataLoader(LoaderFromData(train, reshape_mode=reshape_mode, reshaped_size=reshaped_size,
+                                                                  use_bbox=use_bbox),
+                                                   batch_size=batch_size, shuffle=True, pin_memory=pin_memory,
+                                                   num_workers=n_workers, collate_fn=collate_fun)
+        val_loader = torch.utils.data.DataLoader(LoaderFromData(val, reshape_mode=reshape_mode, reshaped_size=reshaped_size,
+                                                                use_bbox=use_bbox),
+                                                 batch_size=batch_size, shuffle=True, pin_memory=pin_memory,
+                                                 num_workers=n_workers, collate_fn=collate_fun)
         return train_loader, val_loader
 
