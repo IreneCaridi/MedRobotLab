@@ -61,7 +61,7 @@ def pad_and_resize(image: np.ndarray, target_size: int):
     padded_image = np.pad(image, padding, mode='constant', constant_values=0)
 
     # Resize to target size
-    resized_image = cv2.resize(padded_image, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
+    resized_image = cv2.resize(padded_image, (target_size, target_size), interpolation=cv2.INTER_NEAREST)
 
     return resized_image
 
@@ -86,7 +86,7 @@ def center_crop_and_resize(image: np.ndarray, target_size: int):
     cropped_image = image[start_y:start_y + min_dim, start_x:start_x + min_dim]
 
     # Resize to target size
-    resized_image = cv2.resize(cropped_image, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
+    resized_image = cv2.resize(cropped_image, (target_size, target_size), interpolation=cv2.INTER_NEAREST)
 
     return resized_image
 
